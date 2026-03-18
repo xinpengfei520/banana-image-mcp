@@ -4,7 +4,7 @@
   "type": "module",
   "main": "index.js",
   "bin": {
-    "banana-image-mcp": "./index.js"
+    "banana-image-mcp": "index.js"
   },
   "scripts": {
     "start": "node index.js"
