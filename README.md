@@ -71,18 +71,36 @@ QINIU_CDN_DOMAIN=https://your-cdn-domain.com
 
 ### 作为 MCP 服务使用
 
-在 MCP 客户端（如 Claude Desktop）中配置此服务：
+在 Claude Desktop 的 MCP 配置文件中添加此服务。
+
+**配置文件位置**：
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+**配置示例**：
 
 ```json
 {
   "mcpServers": {
     "banana-image": {
       "command": "node",
-      "args": ["/path/to/banana-image-mcp/index.js"]
+      "args": ["/absolute/path/to/banana-image-mcp/index.js"],
+      "env": {
+        "GEMINI_API_KEY": "your_gemini_api_key",
+        "QINIU_ACCESS_KEY": "your_access_key",
+        "QINIU_SECRET_KEY": "your_secret_key",
+        "QINIU_BUCKET": "your_bucket",
+        "QINIU_CDN_DOMAIN": "your_cdn_domain"
+      }
     }
   }
 }
 ```
+
+**注意**：
+- 必须使用绝对路径指向 `index.js`
+- 可以在配置中直接设置环境变量，或使用项目根目录的 `.env` 文件
+- 配置完成后重启 Claude Desktop
 
 ### 调用示例
 

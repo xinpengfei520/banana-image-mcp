@@ -1,8 +1,15 @@
+#!/usr/bin/env node
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
 import qiniu from "qiniu";
 import { GoogleGenAI } from "@google/genai";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -85,7 +92,7 @@ async function uploadToQiniu(filePath, fileName, uploadPath = "blog-cover") {
   const uploadToken = putPolicy.uploadToken(mac);
 
   const config = new qiniu.conf.Config();
-  config.zone = qiniu.zone.Zone_z0; // 华东区域
+  config.zone = qiniu.zone.Zone_z0;
 
   const formUploader = new qiniu.form_up.FormUploader(config);
   const putExtra = new qiniu.form_up.PutExtra();
@@ -105,26 +112,98 @@ async function uploadToQiniu(filePath, fileName, uploadPath = "blog-cover") {
   });
 }
 
-// ====== MCP Tool 主函数 ======
+// ====== 主函数 ======
 
-export async function generate_blog_cover({ prompt, slug, path: uploadPath = "blog-cover" }) {
+async function generate_blog_cover({ prompt, slug, path: uploadPath = "blog-cover" }) {
   const fileName = getFileName(slug);
 
   const rawPath = path.join(TMP_DIR, `${fileName}.png`);
   const webpPath = path.join(TMP_DIR, `${fileName}.webp`);
 
-  // 1. 生图
   await generateImage(prompt, rawPath);
-
-  // 2. 压缩
   await convertToWebp(rawPath, webpPath);
-
-  // 3. 上传
   const url = await uploadToQiniu(webpPath, fileName, uploadPath);
 
-  // 4. 清理
   fs.unlinkSync(rawPath);
   fs.unlinkSync(webpPath);
 
   return { url };
 }
+
+// ====== MCP 服务器 ======
+
+const server = new Server(
+  {
+    name: "banana-image-mcp",
+    version: "1.0.0",
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
+
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      {
+        name: "generate_blog_cover",
+        description: "Generate a blog cover image using Google Gemini AI, convert to WebP format, and upload to Qiniu CDN",
+        inputSchema: {
+          type: "object",
+          properties: {
+            prompt: {
+              type: "string",
+              description: "The text prompt describing the image to generate",
+            },
+            slug: {
+              type: "string",
+              description: "The slug identifier for the filename (will be prefixed with date)",
+            },
+            path: {
+              type: "string",
+              description: "Upload directory path (default: 'blog-cover')",
+              default: "blog-cover",
+            },
+          },
+          required: ["prompt", "slug"],
+        },
+      },
+    ],
+  };
+});
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (request.params.name === "generate_blog_cover") {
+    try {
+      const result = await generate_blog_cover(request.params.arguments);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+  throw new Error(`Unknown tool: ${request.params.name}`);
+});
+
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+main().catch(console.error);
