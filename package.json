@@ -3,13 +3,40 @@
   "version": "1.0.0",
   "type": "module",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "bin": {
+    "banana-image-mcp": "./index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "image-generation",
+    "gemini",
+    "blog-cover",
+    "qiniu",
+    "webp"
+  ],
+  "author": "xinpengfei520",
+  "license": "MIT",
+  "description": "An MCP server for generating blog cover images using Google Gemini AI, with WebP conversion and Qiniu CDN upload",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xinpengfei520/banana-image-mcp.git"
+  },
+  "homepage": "https://github.com/xinpengfei520/banana-image-mcp",
+  "bugs": {
+    "url": "https://github.com/xinpengfei520/banana-image-mcp/issues"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@google/genai": "^1.45.0",
     "@modelcontextprotocol/sdk": "^1.27.1",

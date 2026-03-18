@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "fs";
+import os from "os";
 import path from "path";
 import sharp from "sharp";
 import qiniu from "qiniu";
@@ -12,12 +13,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import dotenv from "dotenv";
 
-dotenv.config();
+dotenv.config({ override: false });
 
 // ====== 配置 ======
-const TMP_DIR = "./tmp";
+const TMP_DIR = path.join(os.tmpdir(), "banana-image-mcp");
 if (!fs.existsSync(TMP_DIR)) {
-  fs.mkdirSync(TMP_DIR);
+  fs.mkdirSync(TMP_DIR, { recursive: true });
 }
 
 // ====== 工具函数 ======
