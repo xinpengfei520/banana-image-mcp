@@ -113,7 +113,57 @@ async function uploadToQiniu(filePath, fileName, uploadPath = "blog-cover") {
   });
 }
 
-// ====== 主函数 ======
+// ====== 上传图片（本地或网络） ======
+
+async function upload_image({ source, slug, path: uploadPath = "images" }) {
+  const fileName = getFileName(slug);
+  const webpPath = path.join(TMP_DIR, `${fileName}.webp`);
+
+  let inputPath;
+  let needCleanInput = false;
+
+  if (/^https?:\/\//.test(source)) {
+    // 网络图片：下载到临时目录
+    const { default: axios } = await import("axios");
+    const response = await axios.get(source, { responseType: "arraybuffer" });
+    inputPath = path.join(TMP_DIR, `${fileName}-download`);
+    fs.writeFileSync(inputPath, Buffer.from(response.data));
+    needCleanInput = true;
+  } else {
+    // 本地图片
+    if (!fs.existsSync(source)) {
+      throw new Error(`File not found: ${source}`);
+    }
+    inputPath = source;
+  }
+
+  await sharp(inputPath).webp({ quality: 80 }).toFile(webpPath);
+  const url = await uploadToQiniu(webpPath, fileName, uploadPath);
+
+  if (needCleanInput) fs.unlinkSync(inputPath);
+  fs.unlinkSync(webpPath);
+
+  return { url };
+}
+
+// ====== 单独生图 ======
+
+async function generate_image({ prompt, slug, path: uploadPath = "aigc/image" }) {
+  const fileName = getFileName(slug);
+  const rawPath = path.join(TMP_DIR, `${fileName}.png`);
+  const webpPath = path.join(TMP_DIR, `${fileName}.webp`);
+
+  await generateImage(prompt, rawPath);
+  await sharp(rawPath).webp({ quality: 80 }).toFile(webpPath);
+  const url = await uploadToQiniu(webpPath, fileName, uploadPath);
+
+  fs.unlinkSync(rawPath);
+  fs.unlinkSync(webpPath);
+
+  return { url };
+}
+
+// ====== 生成博客封面 ======
 
 async function generate_blog_cover({ prompt, slug, path: uploadPath = "blog-cover" }) {
   const fileName = getFileName(slug);
@@ -171,35 +221,88 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["prompt", "slug"],
         },
       },
+      {
+        name: "upload_image",
+        description: "Upload a local or remote image to Qiniu CDN, convert to WebP format, and return the CDN URL",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source: {
+              type: "string",
+              description: "Local file path or HTTP/HTTPS URL of the image to upload",
+            },
+            slug: {
+              type: "string",
+              description: "The slug identifier for the filename (will be prefixed with date)",
+            },
+            path: {
+              type: "string",
+              description: "Upload directory path on CDN (default: 'images')",
+              default: "images",
+            },
+          },
+          required: ["source", "slug"],
+        },
+      },
+      {
+        name: "generate_image",
+        description: "Generate an image using Google Gemini AI, convert to WebP format, upload to Qiniu CDN, and return the CDN URL",
+        inputSchema: {
+          type: "object",
+          properties: {
+            prompt: {
+              type: "string",
+              description: "The text prompt describing the image to generate",
+            },
+            slug: {
+              type: "string",
+              description: "The slug identifier for the filename (will be prefixed with date)",
+            },
+            path: {
+              type: "string",
+              description: "Upload directory path on CDN (default: 'aigc/image')",
+              default: "aigc/image",
+            },
+          },
+          required: ["prompt", "slug"],
+        },
+      },
     ],
   };
 });
 
+const toolHandlers = {
+  generate_blog_cover,
+  upload_image,
+  generate_image,
+};
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name === "generate_blog_cover") {
-    try {
-      const result = await generate_blog_cover(request.params.arguments);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
-    }
+  const handler = toolHandlers[request.params.name];
+  if (!handler) {
+    throw new Error(`Unknown tool: ${request.params.name}`);
   }
-  throw new Error(`Unknown tool: ${request.params.name}`);
+  try {
+    const result = await handler(request.params.arguments);
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Error: ${error.message}`,
+        },
+      ],
+      isError: true,
+    };
+  }
 });
 
 async function main() {
