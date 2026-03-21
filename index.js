@@ -186,7 +186,7 @@ async function generate_blog_cover({ prompt, slug, path: uploadPath = "blog-cove
 const server = new Server(
   {
     name: "banana-image-mcp",
-    version: "1.0.0",
+    version: "1.1.0",
   },
   {
     capabilities: {
