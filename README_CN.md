@@ -8,14 +8,14 @@
 
 [English](./README.md)
 
-一个基于 MCP (Model Context Protocol) 的博客封面图片生成服务，集成 Google Gemini 图片生成 API 和七牛云存储。
+一个基于 MCP (Model Context Protocol) 的图片生成、处理与 CDN 上传服务，集成 Google Gemini AI、Sharp 和七牛云存储。
 
 ## 功能特性
 
 - 使用 Google Gemini AI 生成高质量图片
-- 自动转换为 WebP 格式（1792x1024，80% 质量）
-- 自动上传到七牛云 CDN，文件名自动添加日期前缀
-- 支持自定义上传目录
+- 支持上传本地图片或网络图片到七牛云 CDN
+- 自动转换为 WebP 格式并压缩
+- 文件名自动添加日期前缀，支持自定义上传路径
 - 自动清理临时文件
 
 ## 快速开始
@@ -67,6 +67,16 @@ npm install -g banana-image-mcp
 }
 ```
 
+### 升级
+
+```bash
+# npx 用户：清除缓存即可获取最新版本
+npx clear-npx-cache && npx -y banana-image-mcp
+
+# 全局安装用户
+npm update -g banana-image-mcp
+```
+
 ### 配置文件位置
 
 - **Claude Desktop (macOS)**: `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -98,9 +108,7 @@ npm install -g banana-image-mcp
 
 ### `generate_blog_cover`
 
-生成博客封面图片，转换为 WebP 格式，并上传到七牛云 CDN。
-
-**参数：**
+生成博客封面图片（1792x1024），转换为 WebP 格式，并上传到七牛云 CDN。
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -108,11 +116,47 @@ npm install -g banana-image-mcp
 | `slug` | string | 是 | 文件名标识符（自动添加日期前缀） |
 | `path` | string | 否 | 上传目录路径（默认：`blog-cover`） |
 
-**返回值：** 包含 CDN 图片链接的 JSON。
+**返回值：**
 
 ```json
 {
-  "url": "https://your-cdn-domain.com/blog-cover/20260318-my-post.webp"
+  "url": "https://your-cdn-domain.com/blog-cover/20260321-my-post.webp"
+}
+```
+
+### `generate_image`
+
+使用 Gemini AI 生成图片（保持原始尺寸），转换为 WebP 格式，并上传到七牛云 CDN。
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `prompt` | string | 是 | 描述要生成的图片的文本提示词 |
+| `slug` | string | 是 | 文件名标识符（自动添加日期前缀） |
+| `path` | string | 否 | 上传目录路径（默认：`aigc/image`） |
+
+**返回值：**
+
+```json
+{
+  "url": "https://your-cdn-domain.com/aigc/image/20260321-my-image.webp"
+}
+```
+
+### `upload_image`
+
+上传本地图片或网络图片到七牛云 CDN，自动转换为 WebP 格式。
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `source` | string | 是 | 本地文件路径或 HTTP/HTTPS 图片链接 |
+| `slug` | string | 是 | 文件名标识符（自动添加日期前缀） |
+| `path` | string | 否 | 上传目录路径（默认：`images`） |
+
+**返回值：**
+
+```json
+{
+  "url": "https://your-cdn-domain.com/images/20260321-my-photo.webp"
 }
 ```
 
@@ -120,10 +164,11 @@ npm install -g banana-image-mcp
 
 ```
 提示词 → Google Gemini API (PNG) → Sharp (WebP) → 七牛云 CDN → URL
+图片源 (本地/网络) ──────────→ Sharp (WebP) → 七牛云 CDN → URL
 ```
 
 - **图片生成**：Google Gemini 3.1 Flash Image Preview
-- **图片处理**：Sharp（缩放至 1792x1024，WebP 格式 80% 质量）
+- **图片处理**：Sharp（WebP 转换，可选缩放）
 - **云存储**：七牛云 CDN
 
 ## 许可证

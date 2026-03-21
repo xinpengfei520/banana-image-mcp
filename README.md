@@ -8,14 +8,14 @@
 
 [中文文档](./README_CN.md)
 
-An MCP (Model Context Protocol) server for generating blog cover images using Google Gemini AI, with automatic WebP conversion and Qiniu CDN upload.
+An MCP (Model Context Protocol) server for image generation, processing, and CDN upload. Powered by Google Gemini AI, Sharp, and Qiniu Cloud.
 
 ## Features
 
 - Generate images from text prompts using Google Gemini AI
-- Automatic conversion to WebP format (1792x1024, 80% quality)
-- Upload to Qiniu CDN with date-prefixed filenames
-- Customizable upload directory
+- Upload local or remote images to Qiniu CDN
+- Automatic conversion to WebP format with compression
+- Date-prefixed filenames with customizable upload paths
 - Temporary files are cleaned up automatically
 
 ## Quick Start
@@ -67,6 +67,16 @@ Then configure in your MCP client:
 }
 ```
 
+### Upgrade
+
+```bash
+# npx users: just clear the cache to get the latest version
+npx clear-npx-cache && npx -y banana-image-mcp
+
+# Global installation users
+npm update -g banana-image-mcp
+```
+
 ### Configuration file location
 
 - **Claude Desktop (macOS)**: `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -94,13 +104,11 @@ Then configure in your MCP client:
 3. Get AccessKey and SecretKey from your account settings
 4. Configure a CDN domain
 
-## Tool
+## Tools
 
 ### `generate_blog_cover`
 
-Generate a blog cover image, convert to WebP, and upload to Qiniu CDN.
-
-**Parameters:**
+Generate a blog cover image (1792x1024), convert to WebP, and upload to Qiniu CDN.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -108,11 +116,47 @@ Generate a blog cover image, convert to WebP, and upload to Qiniu CDN.
 | `slug` | string | Yes | Slug identifier for the filename (prefixed with date) |
 | `path` | string | No | Upload directory path (default: `blog-cover`) |
 
-**Returns:** JSON with the CDN URL of the uploaded image.
+**Returns:**
 
 ```json
 {
-  "url": "https://your-cdn-domain.com/blog-cover/20260318-my-post.webp"
+  "url": "https://your-cdn-domain.com/blog-cover/20260321-my-post.webp"
+}
+```
+
+### `generate_image`
+
+Generate an image using Gemini AI (original size), convert to WebP, and upload to Qiniu CDN.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `prompt` | string | Yes | Text prompt describing the image to generate |
+| `slug` | string | Yes | Slug identifier for the filename (prefixed with date) |
+| `path` | string | No | Upload directory path (default: `aigc/image`) |
+
+**Returns:**
+
+```json
+{
+  "url": "https://your-cdn-domain.com/aigc/image/20260321-my-image.webp"
+}
+```
+
+### `upload_image`
+
+Upload a local file or remote URL image to Qiniu CDN, with automatic WebP conversion.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | Yes | Local file path or HTTP/HTTPS URL of the image |
+| `slug` | string | Yes | Slug identifier for the filename (prefixed with date) |
+| `path` | string | No | Upload directory path (default: `images`) |
+
+**Returns:**
+
+```json
+{
+  "url": "https://your-cdn-domain.com/images/20260321-my-photo.webp"
 }
 ```
 
@@ -120,10 +164,11 @@ Generate a blog cover image, convert to WebP, and upload to Qiniu CDN.
 
 ```
 prompt → Google Gemini API (PNG) → Sharp (WebP) → Qiniu CDN → URL
+source (local/remote) ─────────→ Sharp (WebP) → Qiniu CDN → URL
 ```
 
 - **Image generation**: Google Gemini 3.1 Flash Image Preview
-- **Image processing**: Sharp (resize to 1792x1024, WebP at 80% quality)
+- **Image processing**: Sharp (WebP conversion, optional resize)
 - **Cloud storage**: Qiniu CDN
 
 ## License
