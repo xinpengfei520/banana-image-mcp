@@ -16,11 +16,13 @@
     "gemini",
     "blog-cover",
     "qiniu",
+    "aliyun",
+    "oss",
     "webp"
   ],
   "author": "xinpengfei520",
   "license": "MIT",
-  "description": "An MCP server for generating blog cover images using Google Gemini AI, with WebP conversion and Qiniu CDN upload",
+  "description": "An MCP server for generating blog cover images using Google Gemini AI, with WebP conversion and Qiniu / Aliyun OSS CDN upload",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/xinpengfei520/banana-image-mcp.git"
@@ -40,6 +42,7 @@
   "dependencies": {
     "@google/genai": "^1.45.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "ali-oss": "^6.23.0",
     "axios": "^1.13.6",
     "dotenv": "^17.3.1",
     "mime": "^4.1.0",

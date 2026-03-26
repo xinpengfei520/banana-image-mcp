@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import sharp from "sharp";
 import qiniu from "qiniu";
+import OSS from "ali-oss";
 import { GoogleGenAI } from "@google/genai";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -78,7 +79,7 @@ async function convertToWebp(input, output) {
     .toFile(output);
 }
 
-// ====== Step3: 上传七牛 ======
+// ====== Step3: 上传文件 ======
 
 async function uploadToQiniu(filePath, fileName, uploadPath = "blog-cover") {
   const mac = new qiniu.auth.digest.Mac(
@@ -113,6 +114,34 @@ async function uploadToQiniu(filePath, fileName, uploadPath = "blog-cover") {
   });
 }
 
+async function uploadToAliyun(filePath, fileName, uploadPath = "blog-cover") {
+  const client = new OSS({
+    region: process.env.ALIYUN_OSS_REGION,
+    accessKeyId: process.env.ALIYUN_OSS_ACCESS_KEY_ID,
+    accessKeySecret: process.env.ALIYUN_OSS_ACCESS_KEY_SECRET,
+    bucket: process.env.ALIYUN_OSS_BUCKET,
+  });
+
+  const key = `${uploadPath}/${fileName}.webp`;
+  const result = await client.put(key, filePath);
+
+  if (process.env.ALIYUN_OSS_CDN_DOMAIN) {
+    return `${process.env.ALIYUN_OSS_CDN_DOMAIN}/${key}`;
+  }
+  return result.url;
+}
+
+async function uploadFile(filePath, fileName, uploadPath) {
+  const provider = (process.env.UPLOAD_PROVIDER || "qiniu").toLowerCase();
+  if (provider === "aliyun") {
+    return uploadToAliyun(filePath, fileName, uploadPath);
+  }
+  if (provider === "qiniu") {
+    return uploadToQiniu(filePath, fileName, uploadPath);
+  }
+  throw new Error(`Unknown UPLOAD_PROVIDER: ${provider}. Supported: qiniu, aliyun`);
+}
+
 // ====== 上传图片（本地或网络） ======
 
 async function upload_image({ source, slug, path: uploadPath = "images" }) {
@@ -138,7 +167,7 @@ async function upload_image({ source, slug, path: uploadPath = "images" }) {
   }
 
   await sharp(inputPath).webp({ quality: 80 }).toFile(webpPath);
-  const url = await uploadToQiniu(webpPath, fileName, uploadPath);
+  const url = await uploadFile(webpPath, fileName, uploadPath);
 
   if (needCleanInput) fs.unlinkSync(inputPath);
   fs.unlinkSync(webpPath);
@@ -155,7 +184,7 @@ async function generate_image({ prompt, slug, path: uploadPath = "aigc/image" })
 
   await generateImage(prompt, rawPath);
   await sharp(rawPath).webp({ quality: 80 }).toFile(webpPath);
-  const url = await uploadToQiniu(webpPath, fileName, uploadPath);
+  const url = await uploadFile(webpPath, fileName, uploadPath);
 
   fs.unlinkSync(rawPath);
   fs.unlinkSync(webpPath);
@@ -173,7 +202,7 @@ async function generate_blog_cover({ prompt, slug, path: uploadPath = "blog-cove
 
   await generateImage(prompt, rawPath);
   await convertToWebp(rawPath, webpPath);
-  const url = await uploadToQiniu(webpPath, fileName, uploadPath);
+  const url = await uploadFile(webpPath, fileName, uploadPath);
 
   fs.unlinkSync(rawPath);
   fs.unlinkSync(webpPath);
@@ -200,7 +229,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: "generate_blog_cover",
-        description: "Generate a blog cover image using Google Gemini AI, convert to WebP format, and upload to Qiniu CDN",
+        description: "Generate a blog cover image using Google Gemini AI, convert to WebP format, and upload to CDN",
         inputSchema: {
           type: "object",
           properties: {
@@ -223,7 +252,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "upload_image",
-        description: "Upload a local or remote image to Qiniu CDN, convert to WebP format, and return the CDN URL",
+        description: "Upload a local or remote image to CDN, convert to WebP format, and return the CDN URL",
         inputSchema: {
           type: "object",
           properties: {
@@ -246,7 +275,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "generate_image",
-        description: "Generate an image using Google Gemini AI, convert to WebP format, upload to Qiniu CDN, and return the CDN URL",
+        description: "Generate an image using Google Gemini AI, convert to WebP format, upload to CDN, and return the CDN URL",
         inputSchema: {
           type: "object",
           properties: {

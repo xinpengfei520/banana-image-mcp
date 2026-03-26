@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an MCP (Model Context Protocol) server that provides a tool for generating blog cover images. It integrates three services:
+This is an MCP (Model Context Protocol) server that provides a tool for generating blog cover images. It integrates these services:
 1. **Google Gemini AI** - Image generation from text prompts
 2. **Sharp** - Image processing (resize, WebP conversion, compression)
-3. **Qiniu Cloud** - CDN storage for generated images
+3. **Qiniu Cloud** or **Aliyun OSS** - CDN storage for generated images (configurable via `UPLOAD_PROVIDER`)
 
 The main export is `generate_blog_cover()` which orchestrates the full pipeline: generate → compress → upload → cleanup.
 
@@ -21,7 +21,7 @@ The main export is `generate_blog_cover()` which orchestrates the full pipeline:
 
 **Data flow**:
 ```
-prompt → Gemini API (PNG) → Sharp (WebP) → Qiniu CDN → URL
+prompt → Gemini API (PNG) → Sharp (WebP) → CDN (Qiniu / Aliyun OSS) → URL
                 ↓              ↓
              tmpdir/        tmpdir/
            (cleaned up after upload)
@@ -31,10 +31,20 @@ prompt → Gemini API (PNG) → Sharp (WebP) → Qiniu CDN → URL
 
 Required (set via MCP client config or `.env`):
 - `GEMINI_API_KEY` - Google Gemini API key
+- `UPLOAD_PROVIDER` - Upload provider: `qiniu` (default) or `aliyun`
+
+Qiniu Cloud (when `UPLOAD_PROVIDER=qiniu` or not set):
 - `QINIU_ACCESS_KEY` - Qiniu access key
 - `QINIU_SECRET_KEY` - Qiniu secret key
 - `QINIU_BUCKET` - Qiniu storage bucket name
 - `QINIU_CDN_DOMAIN` - CDN domain for returned URLs
+
+Aliyun OSS (when `UPLOAD_PROVIDER=aliyun`):
+- `ALIYUN_OSS_ACCESS_KEY_ID` - Aliyun AccessKey ID
+- `ALIYUN_OSS_ACCESS_KEY_SECRET` - Aliyun AccessKey Secret
+- `ALIYUN_OSS_BUCKET` - OSS bucket name
+- `ALIYUN_OSS_REGION` - OSS region, e.g. `oss-cn-hangzhou`
+- `ALIYUN_OSS_CDN_DOMAIN` - (optional) Custom CDN domain, falls back to default OSS URL
 
 ## Development Commands
 

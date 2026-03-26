@@ -8,21 +8,24 @@
 
 [English](./README.md)
 
-一个基于 MCP (Model Context Protocol) 的图片生成、处理与 CDN 上传服务，集成 Google Gemini AI、Sharp 和七牛云存储。
+一个基于 MCP (Model Context Protocol) 的图片生成、处理与 CDN 上传服务，集成 Google Gemini AI、Sharp，支持七牛云和阿里云 OSS 存储。
 
 ## 功能特性
 
 - 使用 Google Gemini AI 生成高质量图片
-- 支持上传本地图片或网络图片到七牛云 CDN
+- 支持上传本地图片或网络图片到 CDN（七牛云或阿里云 OSS）
 - 自动转换为 WebP 格式并压缩
 - 文件名自动添加日期前缀，支持自定义上传路径
 - 自动清理临时文件
+- 通过环境变量切换上传服务商
 
 ## 快速开始
 
 ### 使用 npx（推荐）
 
 无需安装，直接在 MCP 客户端中配置：
+
+**七牛云（默认）：**
 
 ```json
 {
@@ -42,6 +45,28 @@
 }
 ```
 
+**阿里云 OSS：**
+
+```json
+{
+  "mcpServers": {
+    "banana-image": {
+      "command": "npx",
+      "args": ["-y", "banana-image-mcp"],
+      "env": {
+        "GEMINI_API_KEY": "your-gemini-api-key",
+        "UPLOAD_PROVIDER": "aliyun",
+        "ALIYUN_OSS_ACCESS_KEY_ID": "your-access-key-id",
+        "ALIYUN_OSS_ACCESS_KEY_SECRET": "your-access-key-secret",
+        "ALIYUN_OSS_BUCKET": "your-bucket-name",
+        "ALIYUN_OSS_REGION": "oss-cn-hangzhou",
+        "ALIYUN_OSS_CDN_DOMAIN": "https://your-cdn-domain.com"
+      }
+    }
+  }
+}
+```
+
 ### 全局安装
 
 ```bash
@@ -49,6 +74,8 @@ npm install -g banana-image-mcp
 ```
 
 然后在 MCP 客户端中配置：
+
+**七牛云（默认）：**
 
 ```json
 {
@@ -61,6 +88,27 @@ npm install -g banana-image-mcp
         "QINIU_SECRET_KEY": "your-qiniu-secret-key",
         "QINIU_BUCKET": "your-bucket-name",
         "QINIU_CDN_DOMAIN": "https://your-cdn-domain.com"
+      }
+    }
+  }
+}
+```
+
+**阿里云 OSS：**
+
+```json
+{
+  "mcpServers": {
+    "banana-image": {
+      "command": "banana-image-mcp",
+      "env": {
+        "GEMINI_API_KEY": "your-gemini-api-key",
+        "UPLOAD_PROVIDER": "aliyun",
+        "ALIYUN_OSS_ACCESS_KEY_ID": "your-access-key-id",
+        "ALIYUN_OSS_ACCESS_KEY_SECRET": "your-access-key-secret",
+        "ALIYUN_OSS_BUCKET": "your-bucket-name",
+        "ALIYUN_OSS_REGION": "oss-cn-hangzhou",
+        "ALIYUN_OSS_CDN_DOMAIN": "https://your-cdn-domain.com"
       }
     }
   }
@@ -84,13 +132,36 @@ npm update -g banana-image-mcp
 
 ## 环境变量
 
+### 上传服务商
+
+| 变量 | 说明 |
+|---|---|
+| `UPLOAD_PROVIDER` | 上传服务商：`qiniu`（默认）或 `aliyun` |
+
+### 图片生成
+
 | 变量 | 说明 |
 |---|---|
 | `GEMINI_API_KEY` | Google Gemini API 密钥，用于图片生成 |
+
+### 七牛云（当 `UPLOAD_PROVIDER=qiniu` 或未设置时）
+
+| 变量 | 说明 |
+|---|---|
 | `QINIU_ACCESS_KEY` | 七牛云 AccessKey |
 | `QINIU_SECRET_KEY` | 七牛云 SecretKey |
 | `QINIU_BUCKET` | 七牛云存储空间名称 |
 | `QINIU_CDN_DOMAIN` | CDN 域名，用于生成图片访问链接 |
+
+### 阿里云 OSS（当 `UPLOAD_PROVIDER=aliyun` 时）
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `ALIYUN_OSS_ACCESS_KEY_ID` | 是 | 阿里云 AccessKey ID |
+| `ALIYUN_OSS_ACCESS_KEY_SECRET` | 是 | 阿里云 AccessKey Secret |
+| `ALIYUN_OSS_BUCKET` | 是 | OSS 存储空间名称 |
+| `ALIYUN_OSS_REGION` | 是 | OSS 区域，如 `oss-cn-hangzhou` |
+| `ALIYUN_OSS_CDN_DOMAIN` | 否 | 自定义 CDN 域名（未设置则使用 OSS 默认 URL） |
 
 ### 获取 API Keys
 
@@ -104,11 +175,17 @@ npm update -g banana-image-mcp
 3. 在个人中心获取 AccessKey 和 SecretKey
 4. 配置 CDN 域名
 
+**阿里云 OSS 配置**：
+1. 注册 [阿里云账号](https://www.aliyun.com/)
+2. 创建 OSS 存储空间（Bucket）
+3. 在 AccessKey 管理页面获取 AccessKey ID 和 AccessKey Secret
+4. 记录存储空间所在区域（如 `oss-cn-hangzhou`）
+
 ## 工具
 
 ### `generate_blog_cover`
 
-生成博客封面图片（1792x1024），转换为 WebP 格式，并上传到七牛云 CDN。
+生成博客封面图片（1792x1024），转换为 WebP 格式，并上传到 CDN。
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -126,7 +203,7 @@ npm update -g banana-image-mcp
 
 ### `generate_image`
 
-使用 Gemini AI 生成图片（保持原始尺寸），转换为 WebP 格式，并上传到七牛云 CDN。
+使用 Gemini AI 生成图片（保持原始尺寸），转换为 WebP 格式，并上传到 CDN。
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -144,7 +221,7 @@ npm update -g banana-image-mcp
 
 ### `upload_image`
 
-上传本地图片或网络图片到七牛云 CDN，自动转换为 WebP 格式。
+上传本地图片或网络图片到 CDN，自动转换为 WebP 格式。
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -163,13 +240,13 @@ npm update -g banana-image-mcp
 ## 架构
 
 ```
-提示词 → Google Gemini API (PNG) → Sharp (WebP) → 七牛云 CDN → URL
-图片源 (本地/网络) ──────────→ Sharp (WebP) → 七牛云 CDN → URL
+提示词 → Google Gemini API (PNG) → Sharp (WebP) → CDN（七牛云 / 阿里云 OSS） → URL
+图片源 (本地/网络) ──────────→ Sharp (WebP) → CDN（七牛云 / 阿里云 OSS） → URL
 ```
 
 - **图片生成**：Google Gemini 3.1 Flash Image Preview
 - **图片处理**：Sharp（WebP 转换，可选缩放）
-- **云存储**：七牛云 CDN
+- **云存储**：七牛云或阿里云 OSS（通过 `UPLOAD_PROVIDER` 配置）
 
 ## 许可证
 
