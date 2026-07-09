@@ -218,21 +218,37 @@ URL (or failure reason). The latest 10 entries are shown; in an interactive term
 > These are defaults; `generate_blog_cover` and `generate_image` also accept per-call
 > `model` / `aspectRatio` / `imageSize` parameters that override the environment values.
 
-### Network / Proxy
+### Network — two ways to reach Gemini
 
-Useful when Google Gemini is not directly reachable (e.g. mainland China).
+Useful when Google Gemini is not directly reachable (e.g. mainland China). There are two
+**independent** mechanisms — pick whichever matches your proxy.
+
+**1. Forward proxy** (`PROXY_URL`) — tunnels raw traffic to Google. Use this for a local
+client like Clash / V2Ray / Shadowsocks, or a paid HTTP proxy service.
 
 | Variable | Description |
 |---|---|
-| `PROXY_URL` | HTTP/HTTPS forward proxy for reaching Gemini, e.g. `http://127.0.0.1:7890` |
+| `PROXY_URL` | HTTP/HTTPS forward proxy, e.g. `http://127.0.0.1:7890` or `http://user:pass@host:port` |
 
-`PROXY_URL` is the address of an HTTP/HTTPS **forward proxy that the machine running this
-MCP server can reach and that can itself reach Google**. In practice this is usually the
-local proxy exposed by a client like Clash / V2Ray / Shadowsocks (Clash's default mixed
-port is `7890`, so `http://127.0.0.1:7890`). It can equally be a remote gateway proxy that
-has access to Google — anything that speaks the standard HTTP CONNECT proxy protocol works.
+- Usually the local proxy port of your client (Clash's default mixed port is `7890` → `http://127.0.0.1:7890`).
+- Basic-auth proxies are supported via `http://user:pass@host:port` (URL-encode special characters in the password, e.g. `+` → `%2B`).
+- Only HTTP/HTTPS proxies are supported (not SOCKS5).
+- If `PROXY_URL` is unset, the standard `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` env vars are honored too.
+- Applied to both Gemini API calls and remote image downloads.
 
-`PROXY_URL` takes precedence; if it is not set, the standard `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` environment variables are honored as well. The proxy is applied to both Gemini API calls and remote image downloads.
+> ⚠️ Node's built-in `fetch` does **not** honor your OS "system proxy" setting. Enabling
+> your client's *system-proxy* toggle alone (even in "global"/rule mode) won't route this
+> server. Either set `PROXY_URL`, or use a transparent **TUN / virtual-NIC mode** that
+> captures traffic at the network layer (that's why it worked while your Clash TUN was on).
+
+**2. Reverse-proxy gateway** (`GEMINI_BASE_URL` [+ `GEMINI_EXTRA_HEADERS`]) — point the SDK
+at a self-hosted endpoint that forwards to the Gemini API (e.g. a Cloudflare Worker). In
+this case do **not** set `PROXY_URL`.
+
+| Variable | Description |
+|---|---|
+| `GEMINI_BASE_URL` | Base URL of your gateway, e.g. `https://gemini.example.com` |
+| `GEMINI_EXTRA_HEADERS` | Optional custom headers the gateway requires. JSON, e.g. `{"x-cf-proxy-key":"..."}` — a `Name: value; Name2: value2` string also works |
 
 ### Qiniu Cloud (when `UPLOAD_PROVIDER=qiniu` or not set)
 

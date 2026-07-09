@@ -18,7 +18,7 @@ The main export is `generate_blog_cover()` which orchestrates the full pipeline:
 - Uses ES modules (import/export syntax)
 - Temporary files stored in system temp directory (`os.tmpdir()/banana-image-mcp/`)
 - File naming: `YYYYMMDD-{slug}.webp`
-- Optional HTTP/HTTPS proxy for reaching Gemini (undici `setGlobalDispatcher` for the SDK's global `fetch`; `https-proxy-agent` for axios downloads)
+- Two optional ways to reach Gemini: a forward proxy (undici `setGlobalDispatcher` for the SDK's global `fetch`; `https-proxy-agent` for axios downloads) via `PROXY_URL`, or a reverse-proxy gateway via `GEMINI_BASE_URL` + `GEMINI_EXTRA_HEADERS` (SDK `httpOptions.baseUrl`/`headers`)
 
 **Config wizard** (`cli-setup.js`):
 - Loaded lazily when the binary is invoked as `banana-image-mcp setup`
@@ -50,8 +50,9 @@ Image generation (optional, with defaults):
 - `WEBP_QUALITY` - WebP quality 1–100 (default `80`)
 - `generate_blog_cover` / `generate_image` also accept per-call `model` / `aspectRatio` / `imageSize` args that override the env defaults
 
-Network (optional):
-- `PROXY_URL` - HTTP/HTTPS proxy for reaching Gemini (falls back to `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`)
+Network — two independent ways to reach Gemini (optional):
+- `PROXY_URL` - HTTP/HTTPS **forward proxy** (falls back to `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`); supports `http://user:pass@host:port` auth; HTTP-only (no SOCKS). Node's fetch ignores OS system-proxy settings, so a forward proxy or transparent TUN is required.
+- `GEMINI_BASE_URL` (+ `GEMINI_EXTRA_HEADERS`) - **reverse-proxy gateway**: overrides the SDK `httpOptions.baseUrl` and adds custom headers (JSON or `Name: value; ...`). Used for self-hosted Gemini gateways (e.g. Cloudflare Worker needing `x-cf-proxy-key`). Do not combine with `PROXY_URL`.
 
 Qiniu Cloud (when `UPLOAD_PROVIDER=qiniu` or not set):
 - `QINIU_ACCESS_KEY` - Qiniu access key

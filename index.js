@@ -72,6 +72,41 @@ async function getAxiosProxyConfig() {
   return _axiosProxyConfig;
 }
 
+// ====== 自建 API 网关（反向代理）配置 ======
+// 有些自建代理不是「正向代理」，而是一个模拟 Gemini API 的反向代理网关：
+// 通过覆盖 baseUrl 指向网关，并可携带自定义鉴权请求头（如 x-cf-proxy-key）。
+// 与 PROXY_URL 是两种独立机制，可各自单独使用。
+function parseExtraHeaders(raw) {
+  const s = (raw || "").trim();
+  if (!s) return null;
+  try {
+    const obj = JSON.parse(s);
+    if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+      const out = {};
+      for (const [k, v] of Object.entries(obj)) out[k] = String(v);
+      return Object.keys(out).length ? out : null;
+    }
+  } catch {
+    // 回退格式："Name: value" 多个用 ; 或换行分隔
+    const out = {};
+    for (const part of s.split(/[\n;]+/)) {
+      const i = part.indexOf(":");
+      if (i > 0) out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+    }
+    return Object.keys(out).length ? out : null;
+  }
+  return null;
+}
+
+function buildGeminiHttpOptions() {
+  const opts = {};
+  const baseUrl = (process.env.GEMINI_BASE_URL || "").trim();
+  if (baseUrl) opts.baseUrl = baseUrl;
+  const headers = parseExtraHeaders(process.env.GEMINI_EXTRA_HEADERS);
+  if (headers) opts.headers = headers;
+  return Object.keys(opts).length ? opts : undefined;
+}
+
 // ====== 工具函数 ======
 
 function getFileName(slug) {
@@ -98,6 +133,7 @@ async function generateImage(prompt, outputPath, params) {
 
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY,
+    httpOptions: buildGeminiHttpOptions(),
   });
 
   const { model, aspectRatio, imageSize } = params;
@@ -303,7 +339,7 @@ async function generate_blog_cover({
 const server = new Server(
   {
     name: "banana-image-mcp",
-    version: "1.3.0",
+    version: "1.4.0",
   },
   {
     capabilities: {

@@ -215,19 +215,34 @@ npx -y banana-image-mcp history
 > 以上为默认值；`generate_blog_cover` 与 `generate_image` 也支持在调用时传入
 > `model` / `aspectRatio` / `imageSize` 参数，覆盖环境变量的默认设置。
 
-### 网络 / 代理
+### 网络 —— 访问 Gemini 的两种方式
 
-当无法直接访问 Google Gemini（如中国大陆）时使用。
+当无法直接访问 Google Gemini（如中国大陆）时使用。有**两种独立机制**，按你的代理类型选择其一即可。
+
+**1. 正向代理**（`PROXY_URL`）—— 把原始流量隧道转发到 Google。适用于本地 Clash / V2Ray / Shadowsocks
+客户端，或付费的 HTTP 代理服务。
 
 | 变量 | 说明 |
 |---|---|
-| `PROXY_URL` | 访问 Gemini 使用的 HTTP/HTTPS 正向代理，如 `http://127.0.0.1:7890` |
+| `PROXY_URL` | HTTP/HTTPS 正向代理，如 `http://127.0.0.1:7890` 或 `http://user:pass@host:port` |
 
-`PROXY_URL` 指的是**运行本 MCP 服务的机器可以连上、且它本身能访问 Google 的 HTTP/HTTPS 正向代理地址**。
-通常就是你本地 Clash / V2Ray / Shadowsocks 等客户端暴露的本地代理端口（Clash 默认混合端口是 `7890`，
-即 `http://127.0.0.1:7890`）；也可以是一台能访问 Google 的远程网关代理 —— 只要它支持标准的 HTTP CONNECT 代理协议即可。
+- 通常就是你本地代理客户端暴露的端口（Clash 默认混合端口 `7890` → `http://127.0.0.1:7890`）。
+- 支持带账号密码的代理：`http://用户名:密码@host:port`（密码里的特殊字符需 URL 编码，如 `+` → `%2B`）。
+- 仅支持 HTTP/HTTPS 代理，**不支持 SOCKS5**。
+- 若未设置 `PROXY_URL`，也会读取标准的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` 环境变量。
+- 同时作用于 Gemini API 请求与网络图片下载。
 
-`PROXY_URL` 优先级最高；若未设置，也会读取标准的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` 环境变量。代理会同时作用于 Gemini API 请求与网络图片下载。
+> ⚠️ Node 内置的 `fetch` **不认操作系统的「系统代理」设置**。仅打开代理客户端的「系统代理」开关
+> （即使切到「全局/Global」规则模式）也无法让本服务走代理。请设置 `PROXY_URL`，或使用在网络层
+> 透明接管流量的 **TUN / 虚拟网卡模式**（这正是你之前开着 Clash TUN 时能通的原因）。
+
+**2. 反向代理网关**（`GEMINI_BASE_URL` [+ `GEMINI_EXTRA_HEADERS`]）—— 把 SDK 的请求指向一个转发到
+Gemini API 的自建端点（如 Cloudflare Worker）。这种方式下**不要**设置 `PROXY_URL`。
+
+| 变量 | 说明 |
+|---|---|
+| `GEMINI_BASE_URL` | 网关地址，如 `https://gemini.example.com` |
+| `GEMINI_EXTRA_HEADERS` | 网关需要的自定义请求头。JSON，如 `{"x-cf-proxy-key":"..."}`；也可用 `名称: 值; 名称2: 值2` 字符串 |
 
 ### 七牛云（当 `UPLOAD_PROVIDER=qiniu` 或未设置时）
 

@@ -88,6 +88,24 @@ function backup(configFile, rawText) {
   return b;
 }
 
+// 将 "Name: value; Name2: value2" 或 JSON 归一化为 JSON 字符串（用于 GEMINI_EXTRA_HEADERS）
+function headersToJson(input) {
+  const s = (input || "").trim();
+  if (!s) return "";
+  try {
+    const o = JSON.parse(s);
+    if (o && typeof o === "object" && !Array.isArray(o)) return JSON.stringify(o);
+  } catch {
+    // 继续按 "Name: value" 解析
+  }
+  const out = {};
+  for (const part of s.split(/[\n;]+/)) {
+    const i = part.indexOf(":");
+    if (i > 0) out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : "";
+}
+
 // ====== JSON 客户端写入（Claude Code / Desktop / Cursor / 自定义） ======
 
 function jsonHasEntry(configFile) {
@@ -292,11 +310,26 @@ export async function runSetup() {
     console.log("\n--- Google Gemini ---");
     const GEMINI_API_KEY = await ask("GEMINI_API_KEY (必填 / required): ");
     const PROXY_URL = await askDefault(
-      "代理地址 PROXY_URL (可选，如本地 Clash 的 http://127.0.0.1:7890)",
+      "正向代理 PROXY_URL (可选，如本地 Clash 的 http://127.0.0.1:7890，或 http://user:pass@host:port)",
       ""
     );
 
-    console.log("生图模型 / Image model:");
+    console.log(
+      "\n自建 API 网关（可选，反向代理，与正向代理二选一）/ Self-hosted API gateway (optional):"
+    );
+    const GEMINI_BASE_URL = await askDefault(
+      "GEMINI_BASE_URL (可选，网关地址，如 https://gemini.example.com)",
+      ""
+    );
+    let GEMINI_EXTRA_HEADERS = "";
+    if (GEMINI_BASE_URL) {
+      const h = await ask(
+        "网关自定义请求头 (可选，格式  名称: 值  多个用 ; 分隔): "
+      );
+      GEMINI_EXTRA_HEADERS = headersToJson(h);
+    }
+
+    console.log("\n生图模型 / Image model:");
     console.log("  1) gemini-3.1-flash-image-preview (默认 / default)");
     console.log("  2) gemini-3.1-flash-lite-image (Nano Banana Lite，更快更省)");
     console.log("  3) 自定义 / custom");
@@ -327,6 +360,8 @@ export async function runSetup() {
     const env = {};
     if (GEMINI_API_KEY) env.GEMINI_API_KEY = GEMINI_API_KEY;
     if (PROXY_URL) env.PROXY_URL = PROXY_URL;
+    if (GEMINI_BASE_URL) env.GEMINI_BASE_URL = GEMINI_BASE_URL;
+    if (GEMINI_EXTRA_HEADERS) env.GEMINI_EXTRA_HEADERS = GEMINI_EXTRA_HEADERS;
     if (GEMINI_IMAGE_MODEL) env.GEMINI_IMAGE_MODEL = GEMINI_IMAGE_MODEL;
     if (GEMINI_ASPECT_RATIO && GEMINI_ASPECT_RATIO !== "16:9") {
       env.GEMINI_ASPECT_RATIO = GEMINI_ASPECT_RATIO;
