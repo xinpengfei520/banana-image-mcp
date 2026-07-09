@@ -13,6 +13,10 @@ An MCP (Model Context Protocol) server for image generation, processing, and CDN
 ## Features
 
 - Generate images from text prompts using Google Gemini AI
+- **Proxy support** — access Google Gemini from restricted networks (e.g. mainland China) via an HTTP/HTTPS proxy
+- **Configurable model** — default `gemini-3.1-flash-image-preview`, or switch to `gemini-3.1-flash-lite-image`
+- **Configurable aspect ratio & resolution** — e.g. `16:9` / `1:1` / `9:16` and `1K` / `2K` / `4K`
+- **Interactive setup wizard** — run `banana-image-mcp setup` to write your config automatically, no hand-editing JSON
 - Upload local or remote images to CDN (Qiniu Cloud or Aliyun OSS)
 - Automatic conversion to WebP format with compression
 - Date-prefixed filenames with customizable upload paths
@@ -20,6 +24,26 @@ An MCP (Model Context Protocol) server for image generation, processing, and CDN
 - Switch upload provider via environment variable
 
 ## Quick Start
+
+### Interactive setup (`setup`) — recommended
+
+Skip hand-editing JSON. The wizard asks for your keys, proxy, model, aspect ratio,
+resolution and upload provider, then writes the config to the right file(s) (with a backup):
+
+```bash
+npx -y banana-image-mcp setup
+# or, if installed globally:
+banana-image-mcp setup
+```
+
+It lets you pick **one or more** target clients — **Claude Code**, **Claude Desktop**,
+**Cursor**, **Codex**, or a custom JSON path — and merges the `banana-image` entry
+without touching your other MCP servers (Codex's `config.toml` is edited in place,
+preserving its other sections and comments). Restart the client(s) afterwards to apply.
+
+> `init` and `config` are accepted as aliases for `setup`.
+
+### Manual configuration
 
 ### Using npx (recommended)
 
@@ -127,8 +151,53 @@ npm update -g banana-image-mcp
 
 ### Configuration file location
 
-- **Claude Desktop (macOS)**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Claude Desktop (Windows)**: `%APPDATA%\Claude\claude_desktop_config.json`
+The `banana-image` entry lives under the `mcpServers` object of your client's config file:
+
+| Client | OS | Path |
+|---|---|---|
+| **Claude Code** | macOS | `~/.claude.json` |
+| **Claude Code** | Windows | `%USERPROFILE%\.claude.json` |
+| **Claude Desktop** | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| **Claude Desktop** | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| **Cursor** | macOS / Windows | `~/.cursor/mcp.json` |
+| **Codex** | macOS / Windows | `~/.codex/config.toml` (TOML: `[mcp_servers.banana-image]`) |
+
+> Tip: run `banana-image-mcp setup` to have the file(s) created/updated for you — it targets any of the clients above (or a custom path) and backs up the existing file first.
+
+For Claude Code you can also add the server from the CLI:
+
+```bash
+claude mcp add banana-image -- npx -y banana-image-mcp
+```
+
+## CLI Commands
+
+| Command | Description |
+|---|---|
+| `banana-image-mcp setup` | Interactive config wizard (aliases: `init`, `config`) |
+| `banana-image-mcp history` | View generation history / log |
+| `banana-image-mcp --version` | Print the version |
+| `banana-image-mcp` | Run the MCP server over stdio (used by MCP clients) |
+
+### `history` — generation log
+
+Every `generate_image` / `generate_blog_cover` / `upload_image` call is logged to
+`~/.banana-image-mcp/history.jsonl`. View it as a table (latest first):
+
+```bash
+npx -y banana-image-mcp history
+```
+
+It shows date/time, result (success/failure), image size, generation time, and the image
+URL (or failure reason). The latest 10 entries are shown; in an interactive terminal use
+**↑/↓** (or `j`/`k`) to page through older entries and `q` to quit.
+
+```
+   #  时间                 结果    类型  大小       耗时     链接 / 失败原因
+ ─────────────────────────────────────────────────────────────────────────────────────
+   1  2026-07-09 22:15:03  ✓ 成功  封面  186.4 KB   3.4s     https://cdn.example.com/blog-cover/2026…
+   2  2026-07-09 21:58:11  ✗ 失败  生图  —          0.9s     fetch failed (proxy?)
+```
 
 ## Environment Variables
 
@@ -140,9 +209,32 @@ npm update -g banana-image-mcp
 
 ### Image Generation
 
+| Variable | Default | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | — | Google Gemini API key for image generation (required) |
+| `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image-preview` | Image model. Also supports `gemini-3.1-flash-lite-image` |
+| `GEMINI_ASPECT_RATIO` | `16:9` | Aspect ratio, e.g. `16:9`, `1:1`, `9:16`, `4:3`, `3:2`, `21:9` |
+| `GEMINI_IMAGE_SIZE` | `1K` | Resolution: `1K`, `2K` or `4K` |
+| `WEBP_QUALITY` | `80` | WebP compression quality (1–100) |
+
+> These are defaults; `generate_blog_cover` and `generate_image` also accept per-call
+> `model` / `aspectRatio` / `imageSize` parameters that override the environment values.
+
+### Network / Proxy
+
+Useful when Google Gemini is not directly reachable (e.g. mainland China).
+
 | Variable | Description |
 |---|---|
-| `GEMINI_API_KEY` | Google Gemini API key for image generation |
+| `PROXY_URL` | HTTP/HTTPS forward proxy for reaching Gemini, e.g. `http://127.0.0.1:7890` |
+
+`PROXY_URL` is the address of an HTTP/HTTPS **forward proxy that the machine running this
+MCP server can reach and that can itself reach Google**. In practice this is usually the
+local proxy exposed by a client like Clash / V2Ray / Shadowsocks (Clash's default mixed
+port is `7890`, so `http://127.0.0.1:7890`). It can equally be a remote gateway proxy that
+has access to Google — anything that speaks the standard HTTP CONNECT proxy protocol works.
+
+`PROXY_URL` takes precedence; if it is not set, the standard `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` environment variables are honored as well. The proxy is applied to both Gemini API calls and remote image downloads.
 
 ### Qiniu Cloud (when `UPLOAD_PROVIDER=qiniu` or not set)
 
@@ -185,13 +277,17 @@ npm update -g banana-image-mcp
 
 ### `generate_blog_cover`
 
-Generate a blog cover image (1792x1024), convert to WebP, and upload to CDN.
+Generate a blog cover image, convert to WebP, and upload to CDN. The image dimensions
+follow the configured aspect ratio / resolution (default `16:9` at `1K`).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `prompt` | string | Yes | Text prompt describing the image to generate |
 | `slug` | string | Yes | Slug identifier for the filename (prefixed with date) |
 | `path` | string | No | Upload directory path (default: `blog-cover`) |
+| `model` | string | No | Model override (default: `GEMINI_IMAGE_MODEL` or `gemini-3.1-flash-image-preview`) |
+| `aspectRatio` | string | No | Aspect ratio override (default: `GEMINI_ASPECT_RATIO` or `16:9`) |
+| `imageSize` | string | No | Resolution override `1K`/`2K`/`4K` (default: `GEMINI_IMAGE_SIZE` or `1K`) |
 
 **Returns:**
 
@@ -203,13 +299,16 @@ Generate a blog cover image (1792x1024), convert to WebP, and upload to CDN.
 
 ### `generate_image`
 
-Generate an image using Gemini AI (original size), convert to WebP, and upload to CDN.
+Generate an image using Gemini AI, convert to WebP, and upload to CDN.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `prompt` | string | Yes | Text prompt describing the image to generate |
 | `slug` | string | Yes | Slug identifier for the filename (prefixed with date) |
 | `path` | string | No | Upload directory path (default: `aigc/image`) |
+| `model` | string | No | Model override (default: `GEMINI_IMAGE_MODEL` or `gemini-3.1-flash-image-preview`) |
+| `aspectRatio` | string | No | Aspect ratio override (default: `GEMINI_ASPECT_RATIO` or `16:9`) |
+| `imageSize` | string | No | Resolution override `1K`/`2K`/`4K` (default: `GEMINI_IMAGE_SIZE` or `1K`) |
 
 **Returns:**
 
@@ -244,8 +343,8 @@ prompt → Google Gemini API (PNG) → Sharp (WebP) → CDN (Qiniu / Aliyun OSS)
 source (local/remote) ─────────→ Sharp (WebP) → CDN (Qiniu / Aliyun OSS) → URL
 ```
 
-- **Image generation**: Google Gemini 3.1 Flash Image Preview
-- **Image processing**: Sharp (WebP conversion, optional resize)
+- **Image generation**: Google Gemini (`gemini-3.1-flash-image-preview` by default, configurable), with optional proxy
+- **Image processing**: Sharp (WebP conversion; generated aspect ratio / resolution are preserved)
 - **Cloud storage**: Qiniu Cloud or Aliyun OSS (configurable via `UPLOAD_PROVIDER`)
 
 ## License

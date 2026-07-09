@@ -13,6 +13,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import dotenv from "dotenv";
+import { appendHistory } from "./history-store.js";
 
 dotenv.config({ override: false });
 
@@ -20,6 +21,55 @@ dotenv.config({ override: false });
 const TMP_DIR = path.join(os.tmpdir(), "banana-image-mcp");
 if (!fs.existsSync(TMP_DIR)) {
   fs.mkdirSync(TMP_DIR, { recursive: true });
+}
+
+// 生图默认参数（可被环境变量或调用参数覆盖）
+const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const DEFAULT_ASPECT_RATIO = "16:9";
+const DEFAULT_IMAGE_SIZE = "1K";
+
+function getWebpQuality() {
+  const q = parseInt(process.env.WEBP_QUALITY || "", 10);
+  return Number.isFinite(q) && q >= 1 && q <= 100 ? q : 80;
+}
+
+// ====== 代理配置 ======
+// 中国大陆等网络环境下可能无法直接访问 Google Gemini，通过代理转发请求。
+// 支持 PROXY_URL 及常见的 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY 环境变量。
+function getProxyUrl() {
+  return (
+    process.env.PROXY_URL ||
+    process.env.HTTPS_PROXY ||
+    process.env.https_proxy ||
+    process.env.HTTP_PROXY ||
+    process.env.http_proxy ||
+    process.env.ALL_PROXY ||
+    process.env.all_proxy ||
+    ""
+  ).trim();
+}
+
+// 让 @google/genai 使用的全局 fetch 走代理（基于 undici 的全局 dispatcher）
+let _fetchProxyReady = false;
+async function ensureFetchProxy() {
+  if (_fetchProxyReady) return;
+  const proxyUrl = getProxyUrl();
+  if (!proxyUrl) return;
+  const { ProxyAgent, setGlobalDispatcher } = await import("undici");
+  setGlobalDispatcher(new ProxyAgent(proxyUrl));
+  _fetchProxyReady = true;
+}
+
+// 为 axios（下载网络图片）构造代理配置
+let _axiosProxyConfig;
+async function getAxiosProxyConfig() {
+  const proxyUrl = getProxyUrl();
+  if (!proxyUrl) return {};
+  if (_axiosProxyConfig) return _axiosProxyConfig;
+  const { HttpsProxyAgent } = await import("https-proxy-agent");
+  const agent = new HttpsProxyAgent(proxyUrl);
+  _axiosProxyConfig = { httpAgent: agent, httpsAgent: agent, proxy: false };
+  return _axiosProxyConfig;
 }
 
 // ====== 工具函数 ======
@@ -31,20 +81,35 @@ function getFileName(slug) {
 
 // ====== Step1: 调用 Google Gemini API 生图 ======
 
-async function generateImage(prompt, outputPath) {
+// 将调用参数、环境变量与默认值合并为最终的生图参数
+function resolveGenParams(opts = {}) {
+  return {
+    model: opts.model || process.env.GEMINI_IMAGE_MODEL || DEFAULT_IMAGE_MODEL,
+    aspectRatio:
+      opts.aspectRatio || process.env.GEMINI_ASPECT_RATIO || DEFAULT_ASPECT_RATIO,
+    imageSize:
+      opts.imageSize || process.env.GEMINI_IMAGE_SIZE || DEFAULT_IMAGE_SIZE,
+  };
+}
+
+async function generateImage(prompt, outputPath, params) {
+  // 若配置了代理，先让全局 fetch 走代理再发起请求
+  await ensureFetchProxy();
+
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY,
   });
 
+  const { model, aspectRatio, imageSize } = params;
+
   const config = {
     imageConfig: {
-      aspectRatio: "16:9",
-      imageSize: "1K",
+      aspectRatio,
+      imageSize,
     },
     responseModalities: ["IMAGE"],
   };
 
-  const model = "gemini-3.1-flash-image-preview";
   const contents = [
     {
       role: "user",
@@ -71,11 +136,11 @@ async function generateImage(prompt, outputPath) {
 }
 
 // ====== Step2: 转 WebP + 压缩 ======
+// 保留 Gemini 生成的原始尺寸（尊重所设置的生图比例/分辨率），仅做 WebP 压缩
 
 async function convertToWebp(input, output) {
   await sharp(input)
-    .resize(1792, 1024)
-    .webp({ quality: 80 })
+    .webp({ quality: getWebpQuality() })
     .toFile(output);
 }
 
@@ -152,9 +217,13 @@ async function upload_image({ source, slug, path: uploadPath = "images" }) {
   let needCleanInput = false;
 
   if (/^https?:\/\//.test(source)) {
-    // 网络图片：下载到临时目录
+    // 网络图片：下载到临时目录（若配置了代理则通过代理下载）
     const { default: axios } = await import("axios");
-    const response = await axios.get(source, { responseType: "arraybuffer" });
+    const proxyConfig = await getAxiosProxyConfig();
+    const response = await axios.get(source, {
+      responseType: "arraybuffer",
+      ...proxyConfig,
+    });
     inputPath = path.join(TMP_DIR, `${fileName}-download`);
     fs.writeFileSync(inputPath, Buffer.from(response.data));
     needCleanInput = true;
@@ -166,48 +235,67 @@ async function upload_image({ source, slug, path: uploadPath = "images" }) {
     inputPath = source;
   }
 
-  await sharp(inputPath).webp({ quality: 80 }).toFile(webpPath);
+  await sharp(inputPath).webp({ quality: getWebpQuality() }).toFile(webpPath);
+  const size = fs.statSync(webpPath).size;
   const url = await uploadFile(webpPath, fileName, uploadPath);
 
   if (needCleanInput) fs.unlinkSync(inputPath);
   fs.unlinkSync(webpPath);
 
-  return { url };
+  return { url, size };
 }
 
 // ====== 单独生图 ======
 
-async function generate_image({ prompt, slug, path: uploadPath = "aigc/image" }) {
+async function generate_image({
+  prompt,
+  slug,
+  path: uploadPath = "aigc/image",
+  model,
+  aspectRatio,
+  imageSize,
+}) {
   const fileName = getFileName(slug);
   const rawPath = path.join(TMP_DIR, `${fileName}.png`);
   const webpPath = path.join(TMP_DIR, `${fileName}.webp`);
 
-  await generateImage(prompt, rawPath);
-  await sharp(rawPath).webp({ quality: 80 }).toFile(webpPath);
+  const gen = resolveGenParams({ model, aspectRatio, imageSize });
+  await generateImage(prompt, rawPath, gen);
+  await sharp(rawPath).webp({ quality: getWebpQuality() }).toFile(webpPath);
+  const size = fs.statSync(webpPath).size;
   const url = await uploadFile(webpPath, fileName, uploadPath);
 
   fs.unlinkSync(rawPath);
   fs.unlinkSync(webpPath);
 
-  return { url };
+  return { url, size, ...gen };
 }
 
 // ====== 生成博客封面 ======
 
-async function generate_blog_cover({ prompt, slug, path: uploadPath = "blog-cover" }) {
+async function generate_blog_cover({
+  prompt,
+  slug,
+  path: uploadPath = "blog-cover",
+  model,
+  aspectRatio,
+  imageSize,
+}) {
   const fileName = getFileName(slug);
 
   const rawPath = path.join(TMP_DIR, `${fileName}.png`);
   const webpPath = path.join(TMP_DIR, `${fileName}.webp`);
 
-  await generateImage(prompt, rawPath);
+  const gen = resolveGenParams({ model, aspectRatio, imageSize });
+  await generateImage(prompt, rawPath, gen);
   await convertToWebp(rawPath, webpPath);
+  const size = fs.statSync(webpPath).size;
   const url = await uploadFile(webpPath, fileName, uploadPath);
 
   fs.unlinkSync(rawPath);
   fs.unlinkSync(webpPath);
 
-  return { url };
+  return { url, size, ...gen };
 }
 
 // ====== MCP 服务器 ======
@@ -215,7 +303,7 @@ async function generate_blog_cover({ prompt, slug, path: uploadPath = "blog-cove
 const server = new Server(
   {
     name: "banana-image-mcp",
-    version: "1.1.0",
+    version: "1.3.0",
   },
   {
     capabilities: {
@@ -245,6 +333,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Upload directory path (default: 'blog-cover')",
               default: "blog-cover",
+            },
+            model: {
+              type: "string",
+              description:
+                "Gemini image model override (default: env GEMINI_IMAGE_MODEL or 'gemini-3.1-flash-image-preview'). e.g. 'gemini-3.1-flash-lite-image'",
+            },
+            aspectRatio: {
+              type: "string",
+              description:
+                "Aspect ratio override, e.g. '16:9', '1:1', '9:16', '4:3', '3:2', '21:9' (default: env GEMINI_ASPECT_RATIO or '16:9')",
+            },
+            imageSize: {
+              type: "string",
+              description:
+                "Resolution override: '1K', '2K' or '4K' (default: env GEMINI_IMAGE_SIZE or '1K')",
             },
           },
           required: ["prompt", "slug"],
@@ -292,6 +395,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Upload directory path on CDN (default: 'aigc/image')",
               default: "aigc/image",
             },
+            model: {
+              type: "string",
+              description:
+                "Gemini image model override (default: env GEMINI_IMAGE_MODEL or 'gemini-3.1-flash-image-preview'). e.g. 'gemini-3.1-flash-lite-image'",
+            },
+            aspectRatio: {
+              type: "string",
+              description:
+                "Aspect ratio override, e.g. '16:9', '1:1', '9:16', '4:3', '3:2', '21:9' (default: env GEMINI_ASPECT_RATIO or '16:9')",
+            },
+            imageSize: {
+              type: "string",
+              description:
+                "Resolution override: '1K', '2K' or '4K' (default: env GEMINI_IMAGE_SIZE or '1K')",
+            },
           },
           required: ["prompt", "slug"],
         },
@@ -306,13 +424,50 @@ const toolHandlers = {
   generate_image,
 };
 
+// 记录一次工具调用的历史（成功/失败、大小、耗时、链接、错误原因）
+async function runWithHistory(tool, args = {}) {
+  const start = Date.now();
+  const base = {
+    time: new Date().toISOString(),
+    tool,
+    slug: args.slug,
+    source: args.source,
+  };
+  try {
+    const result = await toolHandlers[tool](args);
+    appendHistory({
+      ...base,
+      status: "success",
+      url: result.url ?? null,
+      size: result.size ?? null,
+      duration: (Date.now() - start) / 1000,
+      model: result.model ?? null,
+      aspectRatio: result.aspectRatio ?? null,
+      imageSize: result.imageSize ?? null,
+    });
+    return { url: result.url };
+  } catch (error) {
+    appendHistory({
+      ...base,
+      status: "error",
+      url: null,
+      size: null,
+      duration: (Date.now() - start) / 1000,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const handler = toolHandlers[request.params.name];
-  if (!handler) {
+  if (!toolHandlers[request.params.name]) {
     throw new Error(`Unknown tool: ${request.params.name}`);
   }
   try {
-    const result = await handler(request.params.arguments);
+    const result = await runWithHistory(
+      request.params.name,
+      request.params.arguments
+    );
     return {
       content: [
         {
@@ -335,6 +490,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
+  const command = process.argv[2];
+
+  // 配置向导：banana-image-mcp setup（别名：init / config）
+  if (command === "setup" || command === "init" || command === "config") {
+    const { runSetup } = await import("./cli-setup.js");
+    await runSetup();
+    return;
+  }
+
+  // 生图历史：banana-image-mcp history
+  if (command === "history") {
+    const { runHistory } = await import("./cli-history.js");
+    await runHistory();
+    return;
+  }
+
+  // 显示版本：banana-image-mcp --version / -v
+  if (command === "--version" || command === "-v") {
+    const pkg = JSON.parse(
+      fs.readFileSync(new URL("./package.json", import.meta.url), "utf8")
+    );
+    console.log(pkg.version);
+    return;
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
