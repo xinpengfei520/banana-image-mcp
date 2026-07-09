@@ -1,5 +1,5 @@
 // banana-image-mcp 交互式配置向导 / interactive setup wizard
-// 用法 / usage: banana-image-mcp setup   (别名 alias: init / config)
+// 用法 / usage: banana-image-mcp setup
 import fs from "fs";
 import os from "os";
 import path from "path";

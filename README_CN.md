@@ -41,8 +41,6 @@ banana-image-mcp setup
 不会影响你已有的其他 MCP 服务器（Codex 的 `config.toml` 为就地编辑，保留其余段落与注释）。
 配置完成后请重启对应客户端使其生效。
 
-> `init` 与 `config` 是 `setup` 的别名。
-
 ### 使用 npx（推荐，手动配置）
 
 无需安装，直接在 MCP 客户端中配置：
@@ -172,7 +170,7 @@ claude mcp add banana-image -- npx -y banana-image-mcp
 
 | 命令 | 说明 |
 |---|---|
-| `banana-image-mcp setup` | 交互式配置向导（别名：`init`、`config`） |
+| `banana-image-mcp setup` | 交互式配置向导 |
 | `banana-image-mcp history` | 查看生图历史 / 日志 |
 | `banana-image-mcp --version` | 打印版本号 |
 | `banana-image-mcp` | 以 stdio 方式运行 MCP 服务（供 MCP 客户端调用） |

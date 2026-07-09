@@ -41,8 +41,6 @@ It lets you pick **one or more** target clients — **Claude Code**, **Claude De
 without touching your other MCP servers (Codex's `config.toml` is edited in place,
 preserving its other sections and comments). Restart the client(s) afterwards to apply.
 
-> `init` and `config` are accepted as aliases for `setup`.
-
 ### Manual configuration
 
 ### Using npx (recommended)
@@ -174,7 +172,7 @@ claude mcp add banana-image -- npx -y banana-image-mcp
 
 | Command | Description |
 |---|---|
-| `banana-image-mcp setup` | Interactive config wizard (aliases: `init`, `config`) |
+| `banana-image-mcp setup` | Interactive config wizard |
 | `banana-image-mcp history` | View generation history / log |
 | `banana-image-mcp --version` | Print the version |
 | `banana-image-mcp` | Run the MCP server over stdio (used by MCP clients) |

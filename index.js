@@ -492,8 +492,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const command = process.argv[2];
 
-  // 配置向导：banana-image-mcp setup（别名：init / config）
-  if (command === "setup" || command === "init" || command === "config") {
+  // 配置向导：banana-image-mcp setup
+  if (command === "setup") {
     const { runSetup } = await import("./cli-setup.js");
     await runSetup();
     return;

@@ -21,7 +21,7 @@ The main export is `generate_blog_cover()` which orchestrates the full pipeline:
 - Optional HTTP/HTTPS proxy for reaching Gemini (undici `setGlobalDispatcher` for the SDK's global `fetch`; `https-proxy-agent` for axios downloads)
 
 **Config wizard** (`cli-setup.js`):
-- Loaded lazily when the binary is invoked as `banana-image-mcp setup` (aliases: `init`, `config`)
+- Loaded lazily when the binary is invoked as `banana-image-mcp setup`
 - Interactive readline prompts; multi-select one or more targets (Claude Code / Claude Desktop / Cursor / Codex / custom JSON path), writes/merges the `banana-image` entry into each, backing up existing files first
 - JSON clients use `mcpServers`; Codex uses `~/.codex/config.toml` (`[mcp_servers.banana-image]`), edited via surgical block replace (preserves other sections/comments) with `smol-toml` for validation/detection
 
