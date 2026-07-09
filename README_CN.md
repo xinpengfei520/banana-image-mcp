@@ -35,13 +35,16 @@ npx -y banana-image-mcp setup
 banana-image-mcp setup
 ```
 
-向导会依次询问：
+向导会先让你选择**语言**（中文 / English），然后依次询问：
 
 1. **写入哪个 / 哪些客户端**（可多选）：**Claude Code**、**Claude Desktop**、**Cursor**、**Codex** 或自定义 JSON 路径；
 2. **运行方式**：`npx`（推荐）或全局命令 `banana-image-mcp`；
 3. **`GEMINI_API_KEY`**、**代理 / 网关**（`PROXY_URL` 或 `GEMINI_BASE_URL`，见下方「网络」说明）；
 4. **生图模型、比例、分辨率**；
 5. **上传服务商**（七牛云 / 阿里云 OSS）及其密钥。
+
+> 输错了？在任意提示下输入 **`b`**（或 `back`）即可**返回上一步**。
+> 最后还有一个确认页，可在写入前核对全部配置（密钥自动掩码）。
 
 最后会把 `banana-image` 这一项**合并**写入到所选客户端的配置文件（写入前**自动备份**原文件），
 不影响你已有的其他 MCP 服务器（Codex 的 `config.toml` 为就地编辑，保留其余段落与注释）。

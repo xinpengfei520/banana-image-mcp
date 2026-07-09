@@ -71,15 +71,50 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-function createAsk(rl) {
-  const ask = (question) =>
-    new Promise((resolve) => rl.question(question, (a) => resolve(a.trim())));
-  const askDefault = async (label, def) => {
-    const suffix = def ? ` (${def})` : "";
-    const ans = await ask(`${label}${suffix}: `);
-    return ans || def || "";
-  };
-  return { ask, askDefault };
+// 由向导收集到的 state 组装出 mcpServers 条目（纯函数，便于随时预览/回退后重算）
+function assembleEntry(state) {
+  const env = {};
+  if (state.apiKey) env.GEMINI_API_KEY = state.apiKey;
+  if (state.proxyUrl) env.PROXY_URL = state.proxyUrl;
+  if (state.baseUrl) {
+    env.GEMINI_BASE_URL = state.baseUrl;
+    if (state.extraHeaders) env.GEMINI_EXTRA_HEADERS = state.extraHeaders;
+  }
+  if (state.model) env.GEMINI_IMAGE_MODEL = state.model;
+  if (state.aspect && state.aspect !== "16:9") env.GEMINI_ASPECT_RATIO = state.aspect;
+  if (state.size && state.size !== "1K") env.GEMINI_IMAGE_SIZE = state.size;
+  env.UPLOAD_PROVIDER = state.provider;
+  if (state.provider === "aliyun") {
+    const a = state.aliyun || {};
+    if (a.id) env.ALIYUN_OSS_ACCESS_KEY_ID = a.id;
+    if (a.secret) env.ALIYUN_OSS_ACCESS_KEY_SECRET = a.secret;
+    if (a.bucket) env.ALIYUN_OSS_BUCKET = a.bucket;
+    if (a.region) env.ALIYUN_OSS_REGION = a.region;
+    if (a.cdn) env.ALIYUN_OSS_CDN_DOMAIN = a.cdn;
+  } else {
+    const q = state.qiniu || {};
+    if (q.ak) env.QINIU_ACCESS_KEY = q.ak;
+    if (q.sk) env.QINIU_SECRET_KEY = q.sk;
+    if (q.bucket) env.QINIU_BUCKET = q.bucket;
+    if (q.cdn) env.QINIU_CDN_DOMAIN = q.cdn;
+  }
+  return state.runChoice === "2"
+    ? { command: "banana-image-mcp", env }
+    : { command: "npx", args: ["-y", "banana-image-mcp"], env };
+}
+
+// 摘要展示时对敏感值掩码（密钥类只显示头尾）
+const SECRET_KEYS = new Set([
+  "GEMINI_API_KEY",
+  "QINIU_ACCESS_KEY",
+  "QINIU_SECRET_KEY",
+  "ALIYUN_OSS_ACCESS_KEY_ID",
+  "ALIYUN_OSS_ACCESS_KEY_SECRET",
+]);
+function maskValue(key, v) {
+  if (!SECRET_KEYS.has(key)) return v;
+  const s = String(v);
+  return s.length > 6 ? `${s.slice(0, 3)}…${s.slice(-2)}` : "***";
 }
 
 function backup(configFile, rawText) {
@@ -236,6 +271,8 @@ function writeTarget(target, entry) {
 
 // ====== 主流程 ======
 
+const BACK = Symbol("back");
+
 export async function runSetup() {
   if (!process.stdin.isTTY) {
     console.error(
@@ -249,204 +286,352 @@ export async function runSetup() {
     input: process.stdin,
     output: process.stdout,
   });
-  const { ask, askDefault } = createAsk(rl);
+
+  let lang = "zh"; // 由第一步选择，之后所有文案单语言显示
+  const L = (zh, en) => (lang === "en" ? en : zh);
+
+  const stack = []; // 已执行步骤索引栈，用于「返回上一步」
+  const canGoBack = () => stack.length > 0;
+  const isBackToken = (s) => /^(b|back|<|返回)$/i.test(s);
+
+  // 输入 b / back / < / 返回（且存在上一步）时抛出 BACK，由引擎捕获后回退
+  const ask = (question) =>
+    new Promise((resolve, reject) => {
+      rl.question(question, (a) => {
+        const t = a.trim();
+        if (canGoBack() && isBackToken(t)) reject(BACK);
+        else resolve(t);
+      });
+    });
+  const askDefault = async (label, def) => {
+    const suffix = def ? ` (${def})` : "";
+    const ans = await ask(`${label}${suffix}: `);
+    return ans || def || "";
+  };
+
+  const state = {};
+
+  const steps = [
+    // 0. 语言
+    {
+      key: "lang",
+      run: async () => {
+        console.log("\n🍌 banana-image-mcp");
+        console.log("选择语言 / Select language:");
+        console.log("  1) 中文");
+        console.log("  2) English");
+        const a = await askDefault("请选择 / Enter number", "1");
+        lang = a === "2" ? "en" : "zh";
+      },
+    },
+    // 1. 客户端（可多选）
+    {
+      key: "clients",
+      run: async () => {
+        while (true) {
+          console.log(
+            L("\n选择要写入的 MCP 客户端（可多选）：", "\nSelect MCP client(s) (multi-select):")
+          );
+          CLIENTS.forEach((c, i) => console.log(`  ${i + 1}) ${c.label}`));
+          console.log(`  ${CLIENTS.length + 1}) ${L("自定义 JSON 路径", "Custom JSON path")}`);
+          console.log(
+            L("  （逗号分隔多选，如 1,4；或输入 all 全选）", "  (comma-separated, e.g. 1,4; or 'all')")
+          );
+          const sel = await askDefault(L("请选择", "Enter number(s)"), "1");
+          const targets = [];
+          const seen = new Set();
+          const add = (t) => {
+            if (t.file && !seen.has(t.file)) {
+              seen.add(t.file);
+              targets.push(t);
+            }
+          };
+          if (/^all$/i.test(sel)) {
+            CLIENTS.forEach((c) => add({ ...c, file: expandHome(c.path()) }));
+          } else {
+            for (const tok of sel.split(/[,\s]+/).filter(Boolean)) {
+              const n = parseInt(tok, 10);
+              if (n >= 1 && n <= CLIENTS.length) {
+                add({ ...CLIENTS[n - 1], file: expandHome(CLIENTS[n - 1].path()) });
+              } else if (n === CLIENTS.length + 1) {
+                const cp = await ask(
+                  L("自定义 JSON 配置文件绝对路径：", "Absolute custom JSON config path: ")
+                );
+                if (cp) add({ key: "custom", label: "Custom (JSON)", type: "json", file: expandHome(cp) });
+              }
+            }
+          }
+          if (targets.length) {
+            state.targets = targets;
+            return;
+          }
+          console.log(L("⚠️ 未选择任何客户端，请重新选择。", "⚠️ No client selected, try again."));
+        }
+      },
+    },
+    // 2. 运行方式
+    {
+      key: "runChoice",
+      run: async () => {
+        console.log(L("\n运行方式：", "\nRun command:"));
+        console.log(L("  1) npx（推荐，无需全局安装）", "  1) npx (recommended, no global install)"));
+        console.log(
+          L("  2) 全局命令 banana-image-mcp（需先 npm i -g）", "  2) global banana-image-mcp (needs npm i -g)")
+        );
+        state.runChoice = await askDefault(L("请选择", "Enter number"), "1");
+      },
+    },
+    // 3. GEMINI_API_KEY
+    {
+      key: "apiKey",
+      run: async () => {
+        state.apiKey = await ask(L("\nGEMINI_API_KEY（必填）：", "\nGEMINI_API_KEY (required): "));
+      },
+    },
+    // 4. 正向代理
+    {
+      key: "proxyUrl",
+      run: async () => {
+        state.proxyUrl = await askDefault(
+          L(
+            "正向代理 PROXY_URL（可选，如 http://127.0.0.1:7890 或 http://user:pass@host:port）",
+            "Forward proxy PROXY_URL (optional, e.g. http://127.0.0.1:7890 or http://user:pass@host:port)"
+          ),
+          ""
+        );
+      },
+    },
+    // 5. 反向代理网关
+    {
+      key: "baseUrl",
+      run: async () => {
+        console.log(
+          L(
+            "\n自建 API 网关（可选，反向代理，与正向代理二选一）：",
+            "\nSelf-hosted API gateway (optional, reverse proxy; alternative to PROXY_URL):"
+          )
+        );
+        state.baseUrl = await askDefault(
+          L("GEMINI_BASE_URL（可选，如 https://gemini.example.com）", "GEMINI_BASE_URL (optional, e.g. https://gemini.example.com)"),
+          ""
+        );
+      },
+    },
+    // 6. 网关请求头（仅当填了 baseUrl）
+    {
+      key: "extraHeaders",
+      when: () => !!state.baseUrl,
+      run: async () => {
+        const h = await ask(
+          L("网关自定义请求头（可选，格式  名称: 值  多个用 ; 分隔）：", "Gateway custom headers (optional, 'Name: value; Name2: value2'): ")
+        );
+        state.extraHeaders = headersToJson(h);
+      },
+    },
+    // 7. 生图模型
+    {
+      key: "model",
+      run: async () => {
+        console.log(L("\n生图模型：", "\nImage model:"));
+        console.log(`  1) gemini-3.1-flash-image-preview (${L("默认", "default")})`);
+        console.log(`  2) gemini-3.1-flash-lite-image (${L("更快更省", "faster/cheaper")})`);
+        console.log(`  3) ${L("自定义", "custom")}`);
+        const c = await askDefault(L("请选择", "Enter number"), "1");
+        if (c === "2") state.model = "gemini-3.1-flash-lite-image";
+        else if (c === "3") state.model = await ask(L("模型名：", "Model name: "));
+        else state.model = "";
+      },
+    },
+    // 8. 生图比例
+    {
+      key: "aspect",
+      run: async () => {
+        state.aspect = await askDefault(
+          L("生图比例（16:9 / 1:1 / 9:16 / 4:3 / 3:2 / 21:9）", "Aspect ratio (16:9 / 1:1 / 9:16 / 4:3 / 3:2 / 21:9)"),
+          "16:9"
+        );
+      },
+    },
+    // 9. 生图分辨率
+    {
+      key: "size",
+      run: async () => {
+        state.size = await askDefault(
+          L("生图分辨率（1K / 2K / 4K）", "Resolution (1K / 2K / 4K)"),
+          "1K"
+        );
+      },
+    },
+    // 10. 上传服务商
+    {
+      key: "provider",
+      run: async () => {
+        console.log(L("\n上传服务商：", "\nUpload provider:"));
+        console.log(L("  1) 七牛云 Qiniu（默认）", "  1) Qiniu (default)"));
+        console.log(L("  2) 阿里云 OSS Aliyun", "  2) Aliyun OSS"));
+        const c = await askDefault(L("请选择", "Enter number"), "1");
+        state.provider = c === "2" ? "aliyun" : "qiniu";
+      },
+    },
+    // 11a-d. 七牛云
+    {
+      key: "qiniu.ak",
+      when: () => state.provider === "qiniu",
+      run: async () => {
+        state.qiniu = state.qiniu || {};
+        state.qiniu.ak = await ask("QINIU_ACCESS_KEY: ");
+      },
+    },
+    {
+      key: "qiniu.sk",
+      when: () => state.provider === "qiniu",
+      run: async () => {
+        state.qiniu.sk = await ask("QINIU_SECRET_KEY: ");
+      },
+    },
+    {
+      key: "qiniu.bucket",
+      when: () => state.provider === "qiniu",
+      run: async () => {
+        state.qiniu.bucket = await ask("QINIU_BUCKET: ");
+      },
+    },
+    {
+      key: "qiniu.cdn",
+      when: () => state.provider === "qiniu",
+      run: async () => {
+        state.qiniu.cdn = await ask(
+          L("QINIU_CDN_DOMAIN（如 https://cdn.example.com）：", "QINIU_CDN_DOMAIN (e.g. https://cdn.example.com): ")
+        );
+      },
+    },
+    // 12a-e. 阿里云
+    {
+      key: "aliyun.id",
+      when: () => state.provider === "aliyun",
+      run: async () => {
+        state.aliyun = state.aliyun || {};
+        state.aliyun.id = await ask("ALIYUN_OSS_ACCESS_KEY_ID: ");
+      },
+    },
+    {
+      key: "aliyun.secret",
+      when: () => state.provider === "aliyun",
+      run: async () => {
+        state.aliyun.secret = await ask("ALIYUN_OSS_ACCESS_KEY_SECRET: ");
+      },
+    },
+    {
+      key: "aliyun.bucket",
+      when: () => state.provider === "aliyun",
+      run: async () => {
+        state.aliyun.bucket = await ask("ALIYUN_OSS_BUCKET: ");
+      },
+    },
+    {
+      key: "aliyun.region",
+      when: () => state.provider === "aliyun",
+      run: async () => {
+        state.aliyun.region = await askDefault("ALIYUN_OSS_REGION", "oss-cn-hangzhou");
+      },
+    },
+    {
+      key: "aliyun.cdn",
+      when: () => state.provider === "aliyun",
+      run: async () => {
+        state.aliyun.cdn = await ask(
+          L("ALIYUN_OSS_CDN_DOMAIN（可选）：", "ALIYUN_OSS_CDN_DOMAIN (optional): ")
+        );
+      },
+    },
+    // 13. 确认
+    {
+      key: "confirm",
+      run: async () => {
+        const entry = assembleEntry(state);
+        console.log(L("\n═══ 请确认配置 ═══", "\n═══ Review ═══"));
+        console.log(L("将写入以下文件：", "Will write to:"));
+        for (const t of state.targets) {
+          const exists = fs.existsSync(t.file);
+          const dup = exists && hasEntry(t);
+          const note = dup
+            ? L("（已存在，将覆盖并备份）", " (overwrite + backup)")
+            : exists
+            ? L("（合并写入并备份）", " (merge + backup)")
+            : L("（新建）", " (create)");
+          console.log(`  • ${t.label}: ${t.file}${note}`);
+        }
+        console.log(L("命令：", "command: ") + entry.command + (entry.args ? " " + entry.args.join(" ") : ""));
+        console.log(L("环境变量：", "env:"));
+        for (const [k, v] of Object.entries(entry.env)) {
+          console.log(`    ${k} = ${maskValue(k, v)}`);
+        }
+        if (!entry.env.GEMINI_API_KEY) {
+          console.log(
+            L("  ⚠️ 未填写 GEMINI_API_KEY，生图将不可用（可稍后补充）", "  ⚠️ GEMINI_API_KEY is empty; generation won't work until set")
+          );
+        }
+        const a = await askDefault(L("\n确认写入？(Y/n)", "\nProceed? (Y/n)"), "Y");
+        state.confirmed = /^y(es)?$/i.test(a);
+      },
+    },
+  ];
 
   try {
-    console.log("\n🍌 banana-image-mcp 配置向导 / setup wizard\n");
-
-    // 1. 选择客户端（可多选）
-    console.log("选择要写入的 MCP 客户端（可多选）/ Select MCP client(s):");
-    CLIENTS.forEach((c, i) => console.log(`  ${i + 1}) ${c.label}`));
-    console.log(`  ${CLIENTS.length + 1}) 自定义 JSON 路径 / Custom JSON path`);
-    console.log("  (可多选，用逗号分隔，如 1,4；或输入 all 全选)");
-    const sel = await askDefault(
-      "请选择 / Enter number(s)",
-      "1"
-    );
-
-    const targets = [];
-    const seen = new Set();
-    const addTarget = (t) => {
-      if (!t.file || seen.has(t.file)) return;
-      seen.add(t.file);
-      targets.push(t);
-    };
-
-    if (/^all$/i.test(sel)) {
-      CLIENTS.forEach((c) => addTarget({ ...c, file: expandHome(c.path()) }));
-    } else {
-      for (const token of sel.split(/[,\s]+/).filter(Boolean)) {
-        const n = parseInt(token, 10);
-        if (n >= 1 && n <= CLIENTS.length) {
-          const c = CLIENTS[n - 1];
-          addTarget({ ...c, file: expandHome(c.path()) });
-        } else if (n === CLIENTS.length + 1) {
-          const cp = await ask("自定义 JSON 配置文件绝对路径 / path: ");
-          if (cp) {
-            addTarget({
-              key: "custom",
-              label: "Custom (JSON)",
-              type: "json",
-              file: expandHome(cp),
-            });
-          }
-        }
+    let i = 0;
+    let tipShown = false;
+    while (i < steps.length) {
+      const step = steps[i];
+      if (step.when && !step.when()) {
+        i++;
+        continue;
       }
-    }
-
-    if (!targets.length) {
-      console.error("❌ 未选择任何客户端 / No client selected.");
-      process.exitCode = 1;
-      return;
-    }
-
-    // 2. 运行方式
-    console.log("\n运行方式 / Run command:");
-    console.log("  1) npx (推荐，无需全局安装 / no global install needed)");
-    console.log("  2) 全局命令 banana-image-mcp (需先 npm i -g banana-image-mcp)");
-    const runChoice = await askDefault("请输入序号 / Enter number", "1");
-
-    // 3. Gemini 相关
-    console.log("\n--- Google Gemini ---");
-    const GEMINI_API_KEY = await ask("GEMINI_API_KEY (必填 / required): ");
-    const PROXY_URL = await askDefault(
-      "正向代理 PROXY_URL (可选，如本地 Clash 的 http://127.0.0.1:7890，或 http://user:pass@host:port)",
-      ""
-    );
-
-    console.log(
-      "\n自建 API 网关（可选，反向代理，与正向代理二选一）/ Self-hosted API gateway (optional):"
-    );
-    const GEMINI_BASE_URL = await askDefault(
-      "GEMINI_BASE_URL (可选，网关地址，如 https://gemini.example.com)",
-      ""
-    );
-    let GEMINI_EXTRA_HEADERS = "";
-    if (GEMINI_BASE_URL) {
-      const h = await ask(
-        "网关自定义请求头 (可选，格式  名称: 值  多个用 ; 分隔): "
-      );
-      GEMINI_EXTRA_HEADERS = headersToJson(h);
-    }
-
-    console.log("\n生图模型 / Image model:");
-    console.log("  1) gemini-3.1-flash-image-preview (默认 / default)");
-    console.log("  2) gemini-3.1-flash-lite-image (Nano Banana Lite，更快更省)");
-    console.log("  3) 自定义 / custom");
-    const modelChoice = await askDefault("请输入序号 / Enter number", "1");
-    let GEMINI_IMAGE_MODEL = "";
-    if (modelChoice === "2") {
-      GEMINI_IMAGE_MODEL = "gemini-3.1-flash-lite-image";
-    } else if (modelChoice === "3") {
-      GEMINI_IMAGE_MODEL = await ask("模型名 / model name: ");
-    }
-
-    const GEMINI_ASPECT_RATIO = await askDefault(
-      "生图比例 GEMINI_ASPECT_RATIO (16:9 / 1:1 / 9:16 / 4:3 / 3:2 / 21:9)",
-      "16:9"
-    );
-    const GEMINI_IMAGE_SIZE = await askDefault(
-      "生图分辨率 GEMINI_IMAGE_SIZE (1K / 2K / 4K)",
-      "1K"
-    );
-
-    // 4. 上传服务商
-    console.log("\n--- 上传服务商 / Upload provider ---");
-    console.log("  1) 七牛云 Qiniu (默认 / default)");
-    console.log("  2) 阿里云 OSS Aliyun");
-    const providerChoice = await askDefault("请输入序号 / Enter number", "1");
-    const provider = providerChoice === "2" ? "aliyun" : "qiniu";
-
-    const env = {};
-    if (GEMINI_API_KEY) env.GEMINI_API_KEY = GEMINI_API_KEY;
-    if (PROXY_URL) env.PROXY_URL = PROXY_URL;
-    if (GEMINI_BASE_URL) env.GEMINI_BASE_URL = GEMINI_BASE_URL;
-    if (GEMINI_EXTRA_HEADERS) env.GEMINI_EXTRA_HEADERS = GEMINI_EXTRA_HEADERS;
-    if (GEMINI_IMAGE_MODEL) env.GEMINI_IMAGE_MODEL = GEMINI_IMAGE_MODEL;
-    if (GEMINI_ASPECT_RATIO && GEMINI_ASPECT_RATIO !== "16:9") {
-      env.GEMINI_ASPECT_RATIO = GEMINI_ASPECT_RATIO;
-    }
-    if (GEMINI_IMAGE_SIZE && GEMINI_IMAGE_SIZE !== "1K") {
-      env.GEMINI_IMAGE_SIZE = GEMINI_IMAGE_SIZE;
-    }
-    env.UPLOAD_PROVIDER = provider;
-
-    if (provider === "qiniu") {
-      console.log("\n--- 七牛云 Qiniu ---");
-      env.QINIU_ACCESS_KEY = await ask("QINIU_ACCESS_KEY: ");
-      env.QINIU_SECRET_KEY = await ask("QINIU_SECRET_KEY: ");
-      env.QINIU_BUCKET = await ask("QINIU_BUCKET: ");
-      env.QINIU_CDN_DOMAIN = await ask(
-        "QINIU_CDN_DOMAIN (如 https://cdn.example.com): "
-      );
-    } else {
-      console.log("\n--- 阿里云 OSS Aliyun ---");
-      env.ALIYUN_OSS_ACCESS_KEY_ID = await ask("ALIYUN_OSS_ACCESS_KEY_ID: ");
-      env.ALIYUN_OSS_ACCESS_KEY_SECRET = await ask(
-        "ALIYUN_OSS_ACCESS_KEY_SECRET: "
-      );
-      env.ALIYUN_OSS_BUCKET = await ask("ALIYUN_OSS_BUCKET: ");
-      env.ALIYUN_OSS_REGION = await askDefault(
-        "ALIYUN_OSS_REGION",
-        "oss-cn-hangzhou"
-      );
-      const cdn = await ask("ALIYUN_OSS_CDN_DOMAIN (可选 / optional): ");
-      if (cdn) env.ALIYUN_OSS_CDN_DOMAIN = cdn;
-    }
-
-    for (const k of Object.keys(env)) {
-      if (env[k] === "" || env[k] == null) delete env[k];
-    }
-    if (!env.GEMINI_API_KEY) {
-      console.log(
-        "\n⚠️  未填写 GEMINI_API_KEY，生图功能将不可用（可稍后手动补充）/ GEMINI_API_KEY is empty; add it later to enable generation."
-      );
-    }
-
-    const entry =
-      runChoice === "2"
-        ? { command: "banana-image-mcp", env }
-        : { command: "npx", args: ["-y", "banana-image-mcp"], env };
-
-    // 5. 展示计划并确认
-    console.log("\n即将写入以下配置文件 / Will write to:");
-    for (const t of targets) {
-      const exists = fs.existsSync(t.file);
-      const dup = exists && hasEntry(t);
-      const note = dup
-        ? " （已存在 banana-image，将覆盖并备份 / will overwrite + backup）"
-        : exists
-        ? " （合并写入并备份 / merge + backup）"
-        : " （新建 / create）";
-      console.log(`  • ${t.label}: ${t.file}${note}`);
-    }
-    const confirm = await askDefault("\n确认写入？/ Proceed? (Y/n)", "Y");
-    if (!/^y(es)?$/i.test(confirm)) {
-      console.log("已取消 / Aborted.");
-      return;
-    }
-
-    // 6. 逐个写入
-    const ok = [];
-    const failed = [];
-    for (const t of targets) {
       try {
-        writeTarget(t, entry);
-        ok.push(t);
+        await step.run();
+        if (step.key === "lang" && !tipShown) {
+          console.log(
+            L("\n提示：任何提示下输入 b 可返回上一步。", "\nTip: type 'b' at any prompt to go back.")
+          );
+          tipShown = true;
+        }
+        stack.push(i);
+        i++;
       } catch (e) {
-        failed.push({ t, error: e.message });
+        if (e === BACK) {
+          i = stack.length ? stack.pop() : i;
+          continue;
+        }
+        throw e;
       }
     }
-
-    console.log("");
-    for (const t of ok) console.log(`✅ 已写入 / written: ${t.label} -> ${t.file}`);
-    for (const f of failed)
-      console.log(`❌ 写入失败 / failed: ${f.t.label} -> ${f.t.file}\n   ${f.error}`);
-    console.log(`\nMCP server name: ${SERVER_NAME}`);
-    console.log(
-      "请重启对应的 MCP 客户端使配置生效 / Restart the MCP client(s) to apply.\n"
-    );
   } finally {
     rl.close();
   }
+
+  if (!state.confirmed) {
+    console.log(L("已取消。", "Aborted."));
+    return;
+  }
+
+  // 逐个写入
+  const entry = assembleEntry(state);
+  const ok = [];
+  const failed = [];
+  for (const t of state.targets) {
+    try {
+      writeTarget(t, entry);
+      ok.push(t);
+    } catch (e) {
+      failed.push({ t, error: e.message });
+    }
+  }
+
+  console.log("");
+  for (const t of ok) console.log(`✅ ${L("已写入", "written")}: ${t.label} -> ${t.file}`);
+  for (const f of failed)
+    console.log(`❌ ${L("写入失败", "failed")}: ${f.t.label} -> ${f.t.file}\n   ${f.error}`);
+  console.log(`\nMCP server name: ${SERVER_NAME}`);
+  console.log(
+    L("请重启对应的 MCP 客户端使配置生效。\n", "Restart the MCP client(s) to apply.\n")
+  );
 }

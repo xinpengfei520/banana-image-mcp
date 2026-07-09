@@ -339,7 +339,7 @@ async function generate_blog_cover({
 const server = new Server(
   {
     name: "banana-image-mcp",
-    version: "1.4.0",
+    version: "1.5.0",
   },
   {
     capabilities: {

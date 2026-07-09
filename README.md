@@ -36,13 +36,16 @@ npx -y banana-image-mcp setup
 banana-image-mcp setup
 ```
 
-The wizard walks you through:
+It first asks your preferred **language** (中文 / English), then walks you through:
 
 1. **Which client(s)** to write to (multi-select): **Claude Code**, **Claude Desktop**, **Cursor**, **Codex**, or a custom JSON path;
 2. **Run command**: `npx` (recommended) or the global `banana-image-mcp`;
 3. **`GEMINI_API_KEY`** and **proxy / gateway** (`PROXY_URL` or `GEMINI_BASE_URL`, see [Network](#network--two-ways-to-reach-gemini));
 4. **Image model, aspect ratio, resolution**;
 5. **Upload provider** (Qiniu / Aliyun OSS) and its keys.
+
+> Made a typo? Type **`b`** (or `back`) at any prompt to go back to the previous step.
+> A review screen at the end lets you check everything (secrets masked) before writing.
 
 It then **merges** the `banana-image` entry into each selected config file (**backing up**
 the original first), without touching your other MCP servers (Codex's `config.toml` is
