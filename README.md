@@ -204,6 +204,36 @@ are escaped with `\"`:
 }
 ```
 
+#### Codex (CLI & Desktop)
+
+Codex CLI and the Codex desktop app (`Codex.app`) share the **same** config file —
+`~/.codex/config.toml` (TOML, not JSON) — so configuring it once covers both. The easiest
+way is the wizard (`banana-image-mcp setup` → select **Codex**), which merges the entry and
+backs up the file. To do it by hand, add:
+
+```toml
+[mcp_servers.banana-image]
+command = "/absolute/path/to/npx"
+args = ["-y", "banana-image-mcp"]
+
+[mcp_servers.banana-image.env]
+GEMINI_API_KEY = "your-gemini-api-key"
+# add PROXY_URL or GEMINI_BASE_URL here if you need a proxy/gateway (see Network below)
+UPLOAD_PROVIDER = "qiniu"
+QINIU_ACCESS_KEY = "your-qiniu-access-key"
+QINIU_SECRET_KEY = "your-qiniu-secret-key"
+QINIU_BUCKET = "your-bucket-name"
+QINIU_CDN_DOMAIN = "https://your-cdn-domain.com"
+```
+
+> ⚠️ **Use an absolute path for `command`** (the output of `which npx`), not bare `npx`.
+> The Codex **desktop app** does not inherit your shell `PATH`, so `"npx"` alone usually
+> fails to launch there. Also point it at a `node`/`npx` version `sharp` supports (Node
+> 18 / 20 / 22 — avoid brand-new majors like 26 that have no prebuilt binaries yet). For
+> example, an nvm path looks like `~/.nvm/versions/node/v22.16.0/bin/npx`.
+
+Restart Codex (start a new CLI session, or quit & reopen the desktop app) to load the server.
+
 ### Upgrade
 
 ```bash

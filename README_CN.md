@@ -199,6 +199,35 @@ npm install -g banana-image-mcp
 }
 ```
 
+#### Codex（CLI 与 Desktop）
+
+Codex CLI 和 Codex 桌面版（`Codex.app`）**共用同一个配置文件** `~/.codex/config.toml`
+（TOML，不是 JSON），所以配一次就两个都生效。最省事的方式是用向导
+（`banana-image-mcp setup` → 选 **Codex**），它会自动合并写入并备份原文件。手动配置则在
+`~/.codex/config.toml` 里加上：
+
+```toml
+[mcp_servers.banana-image]
+command = "/absolute/path/to/npx"
+args = ["-y", "banana-image-mcp"]
+
+[mcp_servers.banana-image.env]
+GEMINI_API_KEY = "your-gemini-api-key"
+# 若需要代理/网关，在这里加 PROXY_URL 或 GEMINI_BASE_URL（见下方「网络」说明）
+UPLOAD_PROVIDER = "qiniu"
+QINIU_ACCESS_KEY = "your-qiniu-access-key"
+QINIU_SECRET_KEY = "your-qiniu-secret-key"
+QINIU_BUCKET = "your-bucket-name"
+QINIU_CDN_DOMAIN = "https://your-cdn-domain.com"
+```
+
+> ⚠️ **`command` 要用绝对路径**（即 `which npx` 的输出），不要只写 `npx`。Codex **桌面版**
+> 不继承你终端的 `PATH`，直接写 `"npx"` 通常会启动失败。同时请指向 `sharp` 支持的
+> `node`/`npx` 版本（Node 18 / 20 / 22 —— 避免像 26 这种太新、还没有预编译包的大版本）。
+> 例如 nvm 的路径形如 `~/.nvm/versions/node/v22.16.0/bin/npx`。
+
+配置后**重启 Codex**（CLI 开新会话，或退出重开桌面版）即可加载该服务。
+
 ### 升级
 
 ```bash
