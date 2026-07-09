@@ -13,7 +13,7 @@ An MCP (Model Context Protocol) server for image generation, processing, and CDN
 ## Features
 
 - Generate images from text prompts using Google Gemini AI
-- **Proxy support** — access Google Gemini from restricted networks (e.g. mainland China) via an HTTP/HTTPS proxy
+- **Proxy & gateway support** — reach Google Gemini from restricted networks (e.g. mainland China) via a forward proxy (`PROXY_URL`) or a self-hosted reverse-proxy gateway (`GEMINI_BASE_URL`)
 - **Configurable model** — default `gemini-3.1-flash-image-preview`, or switch to `gemini-3.1-flash-lite-image`
 - **Configurable aspect ratio & resolution** — e.g. `16:9` / `1:1` / `9:16` and `1K` / `2K` / `4K`
 - **Interactive setup wizard** — run `banana-image-mcp setup` to write your config automatically, no hand-editing JSON
@@ -27,8 +27,8 @@ An MCP (Model Context Protocol) server for image generation, processing, and CDN
 
 ### Interactive setup (`setup`) — recommended
 
-Skip hand-editing JSON. The wizard asks for your keys, proxy, model, aspect ratio,
-resolution and upload provider, then writes the config to the right file(s) (with a backup):
+After installing (or on first use), run the `setup` wizard to configure everything — no
+hand-editing JSON:
 
 ```bash
 npx -y banana-image-mcp setup
@@ -36,14 +36,24 @@ npx -y banana-image-mcp setup
 banana-image-mcp setup
 ```
 
-It lets you pick **one or more** target clients — **Claude Code**, **Claude Desktop**,
-**Cursor**, **Codex**, or a custom JSON path — and merges the `banana-image` entry
-without touching your other MCP servers (Codex's `config.toml` is edited in place,
-preserving its other sections and comments). Restart the client(s) afterwards to apply.
+The wizard walks you through:
+
+1. **Which client(s)** to write to (multi-select): **Claude Code**, **Claude Desktop**, **Cursor**, **Codex**, or a custom JSON path;
+2. **Run command**: `npx` (recommended) or the global `banana-image-mcp`;
+3. **`GEMINI_API_KEY`** and **proxy / gateway** (`PROXY_URL` or `GEMINI_BASE_URL`, see [Network](#network--two-ways-to-reach-gemini));
+4. **Image model, aspect ratio, resolution**;
+5. **Upload provider** (Qiniu / Aliyun OSS) and its keys.
+
+It then **merges** the `banana-image` entry into each selected config file (**backing up**
+the original first), without touching your other MCP servers (Codex's `config.toml` is
+edited in place, preserving its other sections and comments). **Restart the client(s)**
+afterwards to apply.
 
 ### Manual configuration
 
-### Using npx (recommended)
+Prefer editing config yourself? Add the `banana-image` server to your MCP client's config file.
+
+#### Using npx (recommended)
 
 No installation needed — configure directly in your MCP client:
 
@@ -89,7 +99,7 @@ No installation needed — configure directly in your MCP client:
 }
 ```
 
-### Global installation
+#### Global installation
 
 ```bash
 npm install -g banana-image-mcp
@@ -131,6 +141,63 @@ Then configure in your MCP client:
         "ALIYUN_OSS_BUCKET": "your-bucket-name",
         "ALIYUN_OSS_REGION": "oss-cn-hangzhou",
         "ALIYUN_OSS_CDN_DOMAIN": "https://your-cdn-domain.com"
+      }
+    }
+  }
+}
+```
+
+#### With a proxy (e.g. mainland China)
+
+Google Gemini is often not directly reachable from mainland China. Pick **one** of the two
+approaches and add its variables to the `env` block. See
+[Network — two ways to reach Gemini](#network--two-ways-to-reach-gemini) for the full explanation.
+
+**A. Forward proxy** — a local client (Clash / V2Ray / Shadowsocks) or a paid HTTP proxy.
+Add `PROXY_URL`:
+
+```json
+{
+  "mcpServers": {
+    "banana-image": {
+      "command": "npx",
+      "args": ["-y", "banana-image-mcp"],
+      "env": {
+        "GEMINI_API_KEY": "your-gemini-api-key",
+        "PROXY_URL": "http://127.0.0.1:7890",
+        "QINIU_ACCESS_KEY": "your-qiniu-access-key",
+        "QINIU_SECRET_KEY": "your-qiniu-secret-key",
+        "QINIU_BUCKET": "your-bucket-name",
+        "QINIU_CDN_DOMAIN": "https://your-cdn-domain.com"
+      }
+    }
+  }
+}
+```
+
+- **Clash / Clash Verge / ClashX**: use the mixed/HTTP port shown under *Settings → Port* (default `7890`) → `http://127.0.0.1:7890`. Alternatively, enable **TUN mode** to route all traffic transparently — then you don't need `PROXY_URL` at all.
+- Proxy that needs a login: `http://username:password@host:port` (URL-encode special characters in the password, e.g. `+` → `%2B`).
+- ⚠️ Just toggling your client's *system proxy* (even in "Global"/rule mode) is **not** enough — Node's `fetch` ignores OS proxy settings. Use `PROXY_URL`, or a transparent **TUN mode**.
+
+**B. Reverse-proxy gateway** — a self-hosted endpoint (e.g. a Cloudflare Worker) that
+forwards to the Gemini API. Set `GEMINI_BASE_URL` (and any header it requires) **instead of**
+`PROXY_URL`. Because `GEMINI_EXTRA_HEADERS` is a JSON string inside JSON, the inner quotes
+are escaped with `\"`:
+
+```json
+{
+  "mcpServers": {
+    "banana-image": {
+      "command": "npx",
+      "args": ["-y", "banana-image-mcp"],
+      "env": {
+        "GEMINI_API_KEY": "your-gemini-api-key",
+        "GEMINI_BASE_URL": "https://gemini.example.com",
+        "GEMINI_EXTRA_HEADERS": "{\"x-cf-proxy-key\":\"your-gateway-key\"}",
+        "QINIU_ACCESS_KEY": "your-qiniu-access-key",
+        "QINIU_SECRET_KEY": "your-qiniu-secret-key",
+        "QINIU_BUCKET": "your-bucket-name",
+        "QINIU_CDN_DOMAIN": "https://your-cdn-domain.com"
       }
     }
   }
@@ -238,8 +305,8 @@ client like Clash / V2Ray / Shadowsocks, or a paid HTTP proxy service.
 
 > ⚠️ Node's built-in `fetch` does **not** honor your OS "system proxy" setting. Enabling
 > your client's *system-proxy* toggle alone (even in "global"/rule mode) won't route this
-> server. Either set `PROXY_URL`, or use a transparent **TUN / virtual-NIC mode** that
-> captures traffic at the network layer (that's why it worked while your Clash TUN was on).
+> server. Either set `PROXY_URL`, or use a transparent **TUN / virtual-NIC mode** — that
+> captures all traffic at the network layer, so no `PROXY_URL` is needed.
 
 **2. Reverse-proxy gateway** (`GEMINI_BASE_URL` [+ `GEMINI_EXTRA_HEADERS`]) — point the SDK
 at a self-hosted endpoint that forwards to the Gemini API (e.g. a Cloudflare Worker). In
@@ -357,7 +424,7 @@ prompt → Google Gemini API (PNG) → Sharp (WebP) → CDN (Qiniu / Aliyun OSS)
 source (local/remote) ─────────→ Sharp (WebP) → CDN (Qiniu / Aliyun OSS) → URL
 ```
 
-- **Image generation**: Google Gemini (`gemini-3.1-flash-image-preview` by default, configurable), with optional proxy
+- **Image generation**: Google Gemini (`gemini-3.1-flash-image-preview` by default, configurable), reachable via optional forward proxy or reverse-proxy gateway
 - **Image processing**: Sharp (WebP conversion; generated aspect ratio / resolution are preserved)
 - **Cloud storage**: Qiniu Cloud or Aliyun OSS (configurable via `UPLOAD_PROVIDER`)
 

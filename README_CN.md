@@ -13,7 +13,7 @@
 ## 功能特性
 
 - 使用 Google Gemini AI 生成高质量图片
-- **支持代理** —— 在无法直接访问 Google Gemini 的网络环境（如中国大陆）下，通过 HTTP/HTTPS 代理访问
+- **支持代理与网关** —— 在无法直接访问 Google Gemini 的网络环境（如中国大陆）下，可通过正向代理（`PROXY_URL`）或自建反向代理网关（`GEMINI_BASE_URL`）访问
 - **可配置生图模型** —— 默认 `gemini-3.1-flash-image-preview`，也可切换为 `gemini-3.1-flash-lite-image`
 - **可配置生图比例与分辨率** —— 如 `16:9` / `1:1` / `9:16`，以及 `1K` / `2K` / `4K`
 - **交互式配置向导** —— 运行 `banana-image-mcp setup` 自动写入配置，无需手动编辑 JSON
@@ -27,8 +27,7 @@
 
 ### 交互式配置（`setup`，推荐）
 
-无需手动编辑 JSON。向导会依次询问 API Key、代理、模型、生图比例、分辨率与上传服务商，
-然后自动写入到对应客户端的配置文件（并自动备份原文件）：
+安装（或首次使用）后运行 `setup` 向导即可完成全部配置，无需手动编辑 JSON：
 
 ```bash
 npx -y banana-image-mcp setup
@@ -36,12 +35,23 @@ npx -y banana-image-mcp setup
 banana-image-mcp setup
 ```
 
-可以**一次选择一个或多个**目标客户端 —— **Claude Code**、**Claude Desktop**、
-**Cursor**、**Codex** 或自定义 JSON 路径，只会合并 `banana-image` 这一项，
-不会影响你已有的其他 MCP 服务器（Codex 的 `config.toml` 为就地编辑，保留其余段落与注释）。
-配置完成后请重启对应客户端使其生效。
+向导会依次询问：
 
-### 使用 npx（推荐，手动配置）
+1. **写入哪个 / 哪些客户端**（可多选）：**Claude Code**、**Claude Desktop**、**Cursor**、**Codex** 或自定义 JSON 路径；
+2. **运行方式**：`npx`（推荐）或全局命令 `banana-image-mcp`；
+3. **`GEMINI_API_KEY`**、**代理 / 网关**（`PROXY_URL` 或 `GEMINI_BASE_URL`，见下方「网络」说明）；
+4. **生图模型、比例、分辨率**；
+5. **上传服务商**（七牛云 / 阿里云 OSS）及其密钥。
+
+最后会把 `banana-image` 这一项**合并**写入到所选客户端的配置文件（写入前**自动备份**原文件），
+不影响你已有的其他 MCP 服务器（Codex 的 `config.toml` 为就地编辑，保留其余段落与注释）。
+配置完成后请**重启对应客户端**使其生效。
+
+### 手动配置
+
+想自己编辑配置？把 `banana-image` 服务加到 MCP 客户端的配置文件里即可。
+
+#### 使用 npx（推荐）
 
 无需安装，直接在 MCP 客户端中配置：
 
@@ -87,7 +97,7 @@ banana-image-mcp setup
 }
 ```
 
-### 全局安装
+#### 全局安装
 
 ```bash
 npm install -g banana-image-mcp
@@ -129,6 +139,60 @@ npm install -g banana-image-mcp
         "ALIYUN_OSS_BUCKET": "your-bucket-name",
         "ALIYUN_OSS_REGION": "oss-cn-hangzhou",
         "ALIYUN_OSS_CDN_DOMAIN": "https://your-cdn-domain.com"
+      }
+    }
+  }
+}
+```
+
+#### 使用代理（如中国大陆）
+
+中国大陆通常无法直接访问 Google Gemini。请从下面**两种方式中选一种**，把对应变量加进
+`env` 里。完整说明见下方 [网络 —— 访问 Gemini 的两种方式](#网络--访问-gemini-的两种方式)。
+
+**A. 正向代理** —— 本地客户端（Clash / V2Ray / Shadowsocks）或付费 HTTP 代理，加 `PROXY_URL`：
+
+```json
+{
+  "mcpServers": {
+    "banana-image": {
+      "command": "npx",
+      "args": ["-y", "banana-image-mcp"],
+      "env": {
+        "GEMINI_API_KEY": "your-gemini-api-key",
+        "PROXY_URL": "http://127.0.0.1:7890",
+        "QINIU_ACCESS_KEY": "your-qiniu-access-key",
+        "QINIU_SECRET_KEY": "your-qiniu-secret-key",
+        "QINIU_BUCKET": "your-bucket-name",
+        "QINIU_CDN_DOMAIN": "https://your-cdn-domain.com"
+      }
+    }
+  }
+}
+```
+
+- **Clash / Clash Verge / ClashX**：用「设置 → 端口」里显示的混合/HTTP 端口（默认 `7890`）→ `http://127.0.0.1:7890`；或直接开 **TUN 模式**透明代理，这样**不用**设 `PROXY_URL`。
+- 需要账号密码的代理：`http://用户名:密码@host:port`（密码里的特殊字符要 URL 编码，如 `+` → `%2B`）。
+- ⚠️ 只开客户端的「系统代理」开关（即使切到「全局」模式）**没用** —— Node 的 `fetch` 不认系统代理。必须用 `PROXY_URL` 或 **TUN 模式**。
+
+**B. 反向代理网关** —— 一个转发到 Gemini API 的自建端点（如 Cloudflare Worker）。设置
+`GEMINI_BASE_URL`（及它需要的请求头），**不要**再设 `PROXY_URL`。由于 `GEMINI_EXTRA_HEADERS`
+是「JSON 套在 JSON 里」，内部引号要用 `\"` 转义：
+
+```json
+{
+  "mcpServers": {
+    "banana-image": {
+      "command": "npx",
+      "args": ["-y", "banana-image-mcp"],
+      "env": {
+        "GEMINI_API_KEY": "your-gemini-api-key",
+        "GEMINI_BASE_URL": "https://gemini.example.com",
+        "GEMINI_EXTRA_HEADERS": "{\"x-cf-proxy-key\":\"your-gateway-key\"}",
+        "QINIU_ACCESS_KEY": "your-qiniu-access-key",
+        "QINIU_SECRET_KEY": "your-qiniu-secret-key",
+        "QINIU_BUCKET": "your-bucket-name",
+        "QINIU_CDN_DOMAIN": "https://your-cdn-domain.com"
       }
     }
   }
@@ -234,7 +298,7 @@ npx -y banana-image-mcp history
 
 > ⚠️ Node 内置的 `fetch` **不认操作系统的「系统代理」设置**。仅打开代理客户端的「系统代理」开关
 > （即使切到「全局/Global」规则模式）也无法让本服务走代理。请设置 `PROXY_URL`，或使用在网络层
-> 透明接管流量的 **TUN / 虚拟网卡模式**（这正是你之前开着 Clash TUN 时能通的原因）。
+> 透明接管流量的 **TUN / 虚拟网卡模式**（TUN 会接管所有流量，因此无需再设 `PROXY_URL`）。
 
 **2. 反向代理网关**（`GEMINI_BASE_URL` [+ `GEMINI_EXTRA_HEADERS`]）—— 把 SDK 的请求指向一个转发到
 Gemini API 的自建端点（如 Cloudflare Worker）。这种方式下**不要**设置 `PROXY_URL`。
@@ -350,7 +414,7 @@ Gemini API 的自建端点（如 Cloudflare Worker）。这种方式下**不要*
 图片源 (本地/网络) ──────────→ Sharp (WebP) → CDN（七牛云 / 阿里云 OSS） → URL
 ```
 
-- **图片生成**：Google Gemini（默认 `gemini-3.1-flash-image-preview`，可配置），支持可选代理
+- **图片生成**：Google Gemini（默认 `gemini-3.1-flash-image-preview`，可配置），可经由可选的正向代理或反向代理网关访问
 - **图片处理**：Sharp（WebP 转换；保留生成图片的比例 / 分辨率）
 - **云存储**：七牛云或阿里云 OSS（通过 `UPLOAD_PROVIDER` 配置）
 
