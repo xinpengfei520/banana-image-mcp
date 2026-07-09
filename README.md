@@ -253,15 +253,15 @@ Every `generate_image` / `generate_blog_cover` / `upload_image` call is logged t
 npx -y banana-image-mcp history
 ```
 
-It shows date/time, result (success/failure), image size, generation time, and the image
-URL (or failure reason). The latest 10 entries are shown; in an interactive terminal use
-**↑/↓** (or `j`/`k`) to page through older entries and `q` to quit.
+It shows date/time, result (success/failure), tool type, model, image size, generation
+time, and the image URL (or failure reason). The latest 10 entries are shown; in an
+interactive terminal use **↑/↓** (or `j`/`k`) to page through older entries and `q` to quit.
 
 ```
-   #  时间                 结果    类型  大小       耗时     链接 / 失败原因
- ─────────────────────────────────────────────────────────────────────────────────────
-   1  2026-07-09 22:15:03  ✓ 成功  封面  186.4 KB   3.4s     https://cdn.example.com/blog-cover/2026…
-   2  2026-07-09 21:58:11  ✗ 失败  生图  —          0.9s     fetch failed (proxy?)
+   #  时间                 结果    类型  模型                     大小       耗时     链接 / 失败原因
+ ───────────────────────────────────────────────────────────────────────────────────────────────────
+   1  2026-07-09 22:15:03  ✓ 成功  封面  3.1-flash-image-preview  186.4 KB   3.4s     https://cdn.example.com/…
+   2  2026-07-09 21:58:11  ✗ 失败  生图  3.1-flash-lite-image     —          0.9s     fetch failed (proxy?)
 ```
 
 ## Environment Variables

@@ -26,8 +26,8 @@ The main export is `generate_blog_cover()` which orchestrates the full pipeline:
 - JSON clients use `mcpServers`; Codex uses `~/.codex/config.toml` (`[mcp_servers.banana-image]`), edited via surgical block replace (preserves other sections/comments) with `smol-toml` for validation/detection
 
 **History** (`history-store.js` + `cli-history.js`):
-- Every tool call is appended to `~/.banana-image-mcp/history.jsonl` (time, tool, status, size, duration, url, error) via `runWithHistory()` in `index.js` — logging failures never break the tool
-- `banana-image-mcp history` renders a paginated, colorized table (latest first; ↑/↓ paging in a TTY)
+- Every tool call is appended to `~/.banana-image-mcp/history.jsonl` (time, tool, status, size, duration, url, error, model/aspectRatio/imageSize) via `runWithHistory()` in `index.js` — logging failures never break the tool
+- `banana-image-mcp history` renders a paginated, colorized table (columns: #, time, result, tool type, model, size, duration, url/error; latest first; ↑/↓ paging in a TTY)
 
 **Data flow**:
 ```

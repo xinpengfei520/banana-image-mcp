@@ -97,14 +97,21 @@ function toolLabel(tool) {
     : "其他";
 }
 
+// 精简模型名：去掉 "models/" 与冗余的 "gemini-" 前缀（如 gemini-3.1-flash-lite-image -> 3.1-flash-lite-image）
+function shortModel(m) {
+  if (!m) return "—";
+  return String(m).replace(/^models\//, "").replace(/^gemini-/, "");
+}
+
 // ====== 表格渲染 ======
-const COLS = { idx: 3, time: 19, result: 6, type: 4, size: 9, dur: 7 };
+const COLS = { idx: 3, time: 19, result: 6, type: 4, model: 23, size: 9, dur: 7 };
+const GAP_COUNT = 7; // 8 列之间共 7 个列间距
 
 function linkWidth() {
   const term = process.stdout.columns || 100;
   const fixed =
-    COLS.idx + COLS.time + COLS.result + COLS.type + COLS.size + COLS.dur;
-  const gaps = 2 * 6; // 6 个列间距，每个 2 空格
+    COLS.idx + COLS.time + COLS.result + COLS.type + COLS.model + COLS.size + COLS.dur;
+  const gaps = 2 * GAP_COUNT;
   return Math.max(24, term - 1 - fixed - gaps);
 }
 
@@ -115,6 +122,7 @@ function headerLine() {
     padEndW("时间", COLS.time),
     padEndW("结果", COLS.result),
     padEndW("类型", COLS.type),
+    padEndW("模型", COLS.model),
     padEndW("大小", COLS.size),
     padEndW("耗时", COLS.dur),
     padEndW("链接 / 失败原因", lw),
@@ -125,7 +133,8 @@ function headerLine() {
 function separatorLine() {
   const lw = linkWidth();
   const total =
-    COLS.idx + COLS.time + COLS.result + COLS.type + COLS.size + COLS.dur + lw + 2 * 6;
+    COLS.idx + COLS.time + COLS.result + COLS.type + COLS.model +
+    COLS.size + COLS.dur + lw + 2 * GAP_COUNT;
   return " " + C.gray + "─".repeat(total) + C.reset;
 }
 
@@ -139,6 +148,7 @@ function rowLine(rec, globalIndex) {
   const result =
     (ok ? C.green : C.red) + padEndW(resultPlain, COLS.result) + C.reset;
   const type = C.dim + padEndW(toolLabel(rec.tool), COLS.type) + C.reset;
+  const model = padEndW(truncW(shortModel(rec.model), COLS.model), COLS.model);
   const size = padEndW(fmtSize(rec.size), COLS.size);
   const dur = padEndW(fmtDur(rec.duration), COLS.dur);
 
@@ -149,7 +159,7 @@ function rowLine(rec, globalIndex) {
     last = C.red + truncW(rec.error || "未知错误", lw) + C.reset;
   }
 
-  return " " + [idx, time, result, type, size, dur, last].join("  ");
+  return " " + [idx, time, result, type, model, size, dur, last].join("  ");
 }
 
 function renderPage(records, page, pages) {
