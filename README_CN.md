@@ -242,6 +242,8 @@ npx clear-npx-cache && npx -y banana-image-mcp
 npm update -g banana-image-mcp
 ```
 
+磁盘上的新包不会替换已经在跑的 MCP 进程。请完全退出客户端再打开，否则下一次生图仍走旧进程。见[常见问题](#常见问题)。
+
 ### 配置文件位置
 
 `banana-image` 这一项位于客户端配置文件的 `mcpServers` 对象下：
@@ -286,10 +288,10 @@ npx -y banana-image-mcp history
 默认展示最近 10 条；在交互式终端中可用 **↑/↓**（或 `j`/`k`）向下/向上翻页，按 `q` 退出。
 
 ```
-   #  时间                 结果    类型  模型                     大小       耗时     链接 / 失败原因
- ───────────────────────────────────────────────────────────────────────────────────────────────────
-   1  2026-07-09 22:15:03  ✓ 成功  封面  3.1-flash-image-preview  186.4 KB   3.4s     https://cdn.example.com/…
-   2  2026-07-09 21:58:11  ✗ 失败  生图  3.1-flash-lite-image     —          0.9s     fetch failed (proxy?)
+   #  时间                 结果    类型  模型                     风格              大小       耗时     链接 / 失败原因
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   1  2026-07-09 22:15:03  ✓ 成功  封面  3.1-flash-image-preview  pornhub           186.4 KB   3.4s     https://cdn.example.com/…
+   2  2026-07-09 21:58:11  ✗ 失败  生图  3.1-flash-lite-image     —                 —          0.9s     fetch failed (proxy?)
 ```
 
 ## 环境变量
@@ -594,6 +596,28 @@ banana-image-mcp styles remove --name "奶油笔记"
   "url": "https://your-cdn-domain.com/images/20260321-my-photo.webp"
 }
 ```
+
+## 常见问题
+
+### 已经升级，history 里还是没有风格
+
+`npx -y banana-image-mcp` 会下载新包。新开的终端里，`--version` 可以已经是新版本，`history` 也能看到风格列。Claude Code、Claude Desktop、Cursor、Codex 里面的服务是另一个进程，它一直用着启动时加载的那一版。磁盘上的文件换掉了，这个进程不会跟着换。
+
+重启前生成的封面，画面仍可能像你要的风格，因为那段描述写进了提示词。历史记录里没有 `style` 字段，风格列就显示 `—`。
+
+客户端如果本来就是 `npx -y banana-image-mcp`，配置不用改，也不用锁版本。
+
+1. 完全退出客户端。只开一个新对话不够。把残留的窗口或进程都退出，然后重新打开。
+2. 再传一次 `style` 生图，例如 `pornhub`。
+3. 离开本仓库目录后检查版本和记录：
+
+```bash
+cd ~
+npx -y banana-image-mcp --version
+npx -y banana-image-mcp history
+```
+
+新的那一行会显示风格 id，例如 `pornhub`。更早的行仍是 `—`。那些记录是旧服务写的，当时没有保存风格。
 
 ## 架构
 

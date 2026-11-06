@@ -248,6 +248,8 @@ npx clear-npx-cache && npx -y banana-image-mcp
 npm update -g banana-image-mcp
 ```
 
+Updating the package on disk does not restart an MCP server that is already running. Quit the client completely and open it again, or the next generation still uses the old process. See [FAQ](#faq).
+
 ### Configuration file location
 
 The `banana-image` entry lives under the `mcpServers` object of your client's config file:
@@ -293,10 +295,10 @@ generation time, and the image URL (or failure reason). The latest 10 entries ar
 interactive terminal use **↑/↓** (or `j`/`k`) to page through older entries and `q` to quit.
 
 ```
-   #  时间                 结果    类型  模型                     大小       耗时     链接 / 失败原因
- ───────────────────────────────────────────────────────────────────────────────────────────────────
-   1  2026-07-09 22:15:03  ✓ 成功  封面  3.1-flash-image-preview  186.4 KB   3.4s     https://cdn.example.com/…
-   2  2026-07-09 21:58:11  ✗ 失败  生图  3.1-flash-lite-image     —          0.9s     fetch failed (proxy?)
+   #  时间                 结果    类型  模型                     风格              大小       耗时     链接 / 失败原因
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   1  2026-07-09 22:15:03  ✓ 成功  封面  3.1-flash-image-preview  pornhub           186.4 KB   3.4s     https://cdn.example.com/…
+   2  2026-07-09 21:58:11  ✗ 失败  生图  3.1-flash-lite-image     —                 —          0.9s     fetch failed (proxy?)
 ```
 
 ## Environment Variables
@@ -605,6 +607,28 @@ Upload a local file or remote URL image to CDN, with automatic WebP conversion.
   "url": "https://your-cdn-domain.com/images/20260321-my-photo.webp"
 }
 ```
+
+## FAQ
+
+### I upgraded, but `history` still shows no style
+
+`npx -y banana-image-mcp` downloads the new package. A new terminal can already print `1.8.0` and show the style column. The server inside Claude Code, Claude Desktop, Cursor, or Codex is a separate process. It keeps the version it loaded at startup. Replacing the files on disk does not replace that process.
+
+A cover made before the restart can still look like the style you asked for, because that wording may have gone into the prompt. The history row has no `style` field, so the column shows `—`.
+
+No config edit is required when the client already starts `npx -y banana-image-mcp`.
+
+1. Quit the client completely. A new chat is not enough. Quit every leftover window or process, then open the client again.
+2. Generate one more image and pass `style`, for example `pornhub`.
+3. From outside this git repository, check the version and the log:
+
+```bash
+cd ~
+npx -y banana-image-mcp --version
+npx -y banana-image-mcp history
+```
+
+The new row shows the style id, such as `pornhub`. Older rows stay `—`. Those generations were written by the previous server, which did not store a style.
 
 ## Architecture
 
