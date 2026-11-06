@@ -5,6 +5,7 @@ import os from "os";
 import path from "path";
 import readline from "readline";
 import { parse as parseToml } from "smol-toml";
+import { describeStyles, resolveStyleSelection } from "./styles.js";
 
 // ====== 目标客户端定义 ======
 // type: json -> mcpServers  |  toml -> [mcp_servers.<name>] (Codex)
@@ -72,7 +73,7 @@ function timestamp() {
 }
 
 // 由向导收集到的 state 组装出 mcpServers 条目（纯函数，便于随时预览/回退后重算）
-function assembleEntry(state) {
+export function assembleEntry(state) {
   const env = {};
   if (state.apiKey) env.GEMINI_API_KEY = state.apiKey;
   if (state.proxyUrl) env.PROXY_URL = state.proxyUrl;
@@ -83,6 +84,7 @@ function assembleEntry(state) {
   if (state.model) env.GEMINI_IMAGE_MODEL = state.model;
   if (state.aspect && state.aspect !== "16:9") env.GEMINI_ASPECT_RATIO = state.aspect;
   if (state.size && state.size !== "1K") env.GEMINI_IMAGE_SIZE = state.size;
+  if (state.imageStyle) env.IMAGE_STYLE = state.imageStyle;
   env.UPLOAD_PROVIDER = state.provider;
   if (state.provider === "aliyun") {
     const a = state.aliyun || {};
@@ -462,7 +464,56 @@ export async function runSetup() {
         );
       },
     },
-    // 10. 上传服务商
+    // 10. 全局生图风格。空或 none 不写入 IMAGE_STYLE，重写条目时会清掉原来的值。
+    {
+      key: "imageStyle",
+      run: async () => {
+        const { styles } = describeStyles();
+        console.log(L("\n全局生图风格 IMAGE_STYLE（可选）：", "\nGlobal image style IMAGE_STYLE (optional):"));
+        console.log(
+          L(
+            "直接回车或输入 none 表示不设全局风格。这次保存会清掉原来的 IMAGE_STYLE。",
+            "Press Enter or type none for no global style. This save clears a previous IMAGE_STYLE."
+          )
+        );
+        console.log(
+          L(
+            "单次生图传入的 style 优先。那一次传 none，就不套全局风格。",
+            "A style passed on one generate call wins. Pass none on that call to skip the global style."
+          )
+        );
+        styles.forEach((style, index) => {
+          const label =
+            style.source === "custom" ? `${style.name} (custom)` : `${style.name} / ${style.nameEn}`;
+          console.log(`  ${index + 1}) ${style.id}  ${label}`);
+        });
+        while (true) {
+          const answer = await askDefault(
+            L("编号、风格 id，或回车跳过", "Number, style id, or Enter to skip"),
+            ""
+          );
+          if (!answer) {
+            state.imageStyle = "";
+            return;
+          }
+          const index = /^\d+$/.test(answer) ? Number(answer) : NaN;
+          const token = index >= 1 && index <= styles.length ? styles[index - 1].id : answer;
+          try {
+            const selected = resolveStyleSelection(token);
+            state.imageStyle = selected.id || "";
+            if (state.imageStyle) {
+              console.log(L(`已选全局风格：${state.imageStyle}`, `Global style: ${state.imageStyle}`));
+            } else {
+              console.log(L("不设全局风格。", "No global style."));
+            }
+            return;
+          } catch (error) {
+            console.log(`⚠️ ${error.message}`);
+          }
+        }
+      },
+    },
+    // 11. 上传服务商
     {
       key: "provider",
       run: async () => {

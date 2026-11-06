@@ -16,7 +16,7 @@ An MCP (Model Context Protocol) server for image generation, processing, and CDN
 - **Proxy & gateway support** — reach Google Gemini from restricted networks (e.g. mainland China) via a forward proxy (`PROXY_URL`) or a self-hosted reverse-proxy gateway (`GEMINI_BASE_URL`)
 - **Configurable model** — default `gemini-3.1-flash-image-preview`, or switch to `gemini-3.1-flash-lite-image`
 - **Configurable aspect ratio & resolution** — e.g. `16:9` / `1:1` / `9:16` and `1K` / `2K` / `4K`
-- **Preset cover styles** — a style prompt is appended only when `style` is passed. Omitting it keeps the original prompt-only generation. For example `dark-chalkboard` or `pornhub` (orange wordmark)
+- **Preset cover styles** — a style prompt is appended only when `style` is passed. Omitting it keeps the original prompt-only generation. For example `dark-chalkboard` or `pornhub` (orange wordmark). Custom styles can be saved on the machine and survive MCP updates
 - **Interactive setup wizard** — run `banana-image-mcp setup` to write your config automatically, no hand-editing JSON
 - Upload local or remote images to CDN (Qiniu Cloud or Aliyun OSS)
 - Automatic conversion to WebP format with compression
@@ -275,7 +275,7 @@ claude mcp add banana-image -- npx -y banana-image-mcp
 |---|---|
 | `banana-image-mcp setup` | Interactive config wizard |
 | `banana-image-mcp history` | View generation history / log |
-| `banana-image-mcp styles` | List preset styles; `styles --style <id>` prints that style's fixed prompt |
+| `banana-image-mcp styles` | List styles; `styles --style <id>` prints a prompt; `styles add --prompt` saves a written prompt; `styles add --image <path-or-url>` extracts a style from a picture |
 | `banana-image-mcp --version` | Print the version |
 | `banana-image-mcp` | Run the MCP server over stdio (used by MCP clients) |
 
@@ -315,11 +315,12 @@ interactive terminal use **↑/↓** (or `j`/`k`) to page through older entries 
 | `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image-preview` | Image model. Also supports `gemini-3.1-flash-lite-image` |
 | `GEMINI_ASPECT_RATIO` | `16:9` | Aspect ratio, e.g. `16:9`, `1:1`, `9:16`, `4:3`, `3:2`, `21:9` |
 | `GEMINI_IMAGE_SIZE` | `1K` | Resolution: `1K`, `2K` or `4K` |
+| `IMAGE_STYLE` | (none) | Global style id, written by `banana-image-mcp setup`. A `style` on one call wins. Pass `none` on that call to skip it |
+| `GEMINI_VISION_MODEL` | `gemini-2.5-flash` | Model that extracts a style prompt from a reference image. Uses the same proxy or gateway as generation |
 | `WEBP_QUALITY` | `80` | WebP compression quality (1–100) |
 
 > These are defaults; `generate_blog_cover` and `generate_image` also accept per-call
-> `model` / `aspectRatio` / `imageSize` parameters that override the environment values.
-> `style` has no environment default. Omit it and the prompt is sent unchanged.
+> `model` / `aspectRatio` / `imageSize` / `style` parameters. A `style` on the call overrides `IMAGE_STYLE`.
 
 ### Network — two ways to reach Gemini
 
@@ -392,9 +393,17 @@ this case do **not** set `PROXY_URL`.
 
 ## Preset styles
 
-`style` on `generate_image` and `generate_blog_cover` is optional. Omit it, pass an empty string, or pass `none`, and the call uses the original path: only `prompt` is sent. A known style id appends that style's fixed prompt after the content prompt.
+`style` on `generate_image` and `generate_blog_cover` is optional. The call uses the first match below:
 
-Put the subject, exact title, and steps in `prompt`. The style only locks medium, palette, lettering, and layout. Pass the same id on every cover when a channel should stay visually consistent.
+1. The `style` passed on that call.
+2. `IMAGE_STYLE`, when setup or the environment set one.
+3. The original path: only `prompt` is sent.
+
+Pass `none` to skip the global style for that one call. An empty value falls through to `IMAGE_STYLE`.
+
+`banana-image-mcp setup` asks for a global style and writes its id to `IMAGE_STYLE` in the MCP client config. Press Enter, or enter `none`, to save with no global style. That clears an `IMAGE_STYLE` saved earlier, because setup rewrites the whole entry. Restart the MCP client after setup.
+
+Put the subject, exact title, and steps in `prompt`. The style only locks medium, palette, lettering, and layout. Set one global style for an account, and pass a different `style` when a single image should look different.
 
 ```bash
 npx -y banana-image-mcp styles
@@ -420,6 +429,41 @@ npx -y banana-image-mcp styles --style dark-chalkboard
 
 The `list_image_styles` tool returns the same catalog. Pass `id` to include the full style prompt.
 
+### Custom styles
+
+Save your own styles when none of the built-in ones fit. Each one has a name and a style prompt. Pass that name as `style` on a later call, the same way you pass a built-in id.
+
+Custom styles are stored at `~/.banana-image-mcp/styles.json` in the user home directory, outside the installed package. Updating, reinstalling, or switching versions of banana-image-mcp leaves that file in place.
+
+```bash
+banana-image-mcp styles add --name "cream-note" --prompt "Soft cream paper, huge rounded black title, blush pink tape and mint stickers."
+```
+
+If you have a picture whose look you want, and you do not want to write the prompt yourself, pass a local path or an http(s) URL. A vision model describes only the visual system (medium, palette, lettering, layout) and that text is saved as the style prompt. The subject and any title in the picture are left out.
+
+```bash
+banana-image-mcp styles add --name "cream-note" --image ./ref.png
+banana-image-mcp styles add --name "cream-note" --image https://example.com/ref.png
+```
+
+When both `--prompt` and `--image` are set, the written prompt is saved and the image is not sent. `styles add` with no arguments asks for the name, then the prompt; leave the prompt empty and it asks for an image path or URL. Saving the same name again updates that one prompt and leaves the other custom styles untouched. A name cannot reuse a built-in id or alias.
+
+The MCP tool is `save_image_style` (`name`, plus `prompt` or `image`). Remove one custom style with `delete_image_style`, or:
+
+```bash
+banana-image-mcp styles remove --name "cream-note"
+```
+
+Built-in styles cannot be deleted.
+
+```json
+{
+  "prompt": "Title \"Weekend Coffee\". A latte beside a window.",
+  "slug": "weekend-coffee",
+  "style": "cream-note"
+}
+```
+
 ```json
 {
   "prompt": "Title \"AI PROMPT GUIDE\". A 3-step flowchart: INPUT with a keyboard, PROCESS with a robot, RESULT with a lightbulb.",
@@ -430,7 +474,7 @@ The `list_image_styles` tool returns the same catalog. Pass `id` to include the 
 
 ### Examples
 
-Every image below uses the same content prompt. They were generated by this server with `gemini-3.1-flash-image-preview` at `16:9` and `1K`. The first one omits `style`. Each of the others changes only the style id.
+Every image below uses the same content prompt. They were generated by this server with `gemini-3.1-flash-image-preview` at `16:9` and `1K`. No `IMAGE_STYLE` was set. The first one omits `style`. Each of the others changes only the style id.
 
 > The main title at the top says "AI PROMPT GUIDE" in large letters. The image shows a 3-step flowchart with arrows: Step 1 labeled "INPUT" with a keyboard icon, Step 2 labeled "PROCESS" with a cute robot head icon, and Step 3 labeled "RESULT" with a glowing lightbulb icon.
 
@@ -480,18 +524,19 @@ follow the configured aspect ratio / resolution (default `16:9` at `1K`).
 | `model` | string | No | Model override (default: `GEMINI_IMAGE_MODEL` or `gemini-3.1-flash-image-preview`) |
 | `aspectRatio` | string | No | Aspect ratio override (default: `GEMINI_ASPECT_RATIO` or `16:9`) |
 | `imageSize` | string | No | Resolution override `1K`/`2K`/`4K` (default: `GEMINI_IMAGE_SIZE` or `1K`) |
-| `style` | string | No | Preset style id, e.g. `dark-chalkboard` or `pornhub`. Omit it, or pass `none`, to skip the preset |
+| `style` | string | No | Style id. Wins over `IMAGE_STYLE`. Omit it to use the global style, or to send the prompt unchanged when none is set. `none` skips the global style for this call |
 
 **Returns:**
 
 ```json
 {
   "url": "https://your-cdn-domain.com/blog-cover/20260321-my-post.webp",
-  "style": "dark-chalkboard"
+  "style": "dark-chalkboard",
+  "styleOrigin": "call"
 }
 ```
 
-`style` is present only when a preset was applied.
+`style` is the id that was applied. `styleOrigin` is `call` when this request passed `style`, and `global` when `IMAGE_STYLE` supplied it. `style` is omitted when no style was applied. A call that passes `none` returns `styleOrigin: "call"` and no `style`.
 
 ### `generate_image`
 
@@ -505,24 +550,43 @@ Generate an image using Gemini AI, convert to WebP, and upload to CDN.
 | `model` | string | No | Model override (default: `GEMINI_IMAGE_MODEL` or `gemini-3.1-flash-image-preview`) |
 | `aspectRatio` | string | No | Aspect ratio override (default: `GEMINI_ASPECT_RATIO` or `16:9`) |
 | `imageSize` | string | No | Resolution override `1K`/`2K`/`4K` (default: `GEMINI_IMAGE_SIZE` or `1K`) |
-| `style` | string | No | Preset style id, e.g. `dark-chalkboard` or `pornhub`. Omit it, or pass `none`, to skip the preset |
+| `style` | string | No | Style id. Wins over `IMAGE_STYLE`. Omit it to use the global style, or to send the prompt unchanged when none is set. `none` skips the global style for this call |
 
 **Returns:**
 
 ```json
 {
   "url": "https://your-cdn-domain.com/aigc/image/20260321-my-image.webp",
-  "style": "pornhub"
+  "style": "pornhub",
+  "styleOrigin": "global"
 }
 ```
 
 ### `list_image_styles`
 
-List preset styles. Pass `id` (or an alias) to include that style's fixed prompt.
+List built-in styles and custom styles saved on this machine. The result includes `globalStyle`, the `IMAGE_STYLE` this process would use when a call omits `style`. Pass `id` (or an alias or custom name) to include that style's fixed prompt. An unusable `IMAGE_STYLE` is reported on `globalStyle.error` and does not hide the catalog.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `id` | string | No | Style id or alias. Omit it to list every style's name and summary |
+| `id` | string | No | Style id, alias, or custom name. Omit it to list every style |
+
+### `save_image_style`
+
+Save one custom style to `~/.banana-image-mcp/styles.json`. Pass a written prompt, or an image whose look is extracted into a prompt. Saving the same name again updates that style and keeps the others.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | Yes | Style name. Pass this later as `style` |
+| `prompt` | string | No | Fixed style prompt: medium, palette, lettering, and layout. Required when `image` is empty. Wins when both are set |
+| `image` | string | No | Local path or http(s) URL. Used only when `prompt` is empty. A vision model writes the style prompt |
+
+### `delete_image_style`
+
+Delete one custom style. Built-in styles cannot be deleted.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | Yes | Name or id of the custom style to delete |
 
 ### `upload_image`
 

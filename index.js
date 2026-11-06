@@ -16,9 +16,16 @@ import {
 import dotenv from "dotenv";
 import { appendHistory } from "./history-store.js";
 import {
+  assertUsableStylePrompt,
+  classifyStyleImageSource,
+  STYLE_EXTRACTION_INSTRUCTION,
+} from "./style-extract.js";
+import {
   composeStyledPrompt,
+  deleteCustomStyle,
   describeStyles,
   resolveStyleSelection,
+  saveCustomStyleInput,
   styleParamDescription,
 } from "./styles.js";
 
@@ -32,8 +39,10 @@ if (!fs.existsSync(TMP_DIR)) {
 
 // 生图默认参数（可被环境变量或调用参数覆盖）
 const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const DEFAULT_VISION_MODEL = "gemini-2.5-flash";
 const DEFAULT_ASPECT_RATIO = "16:9";
 const DEFAULT_IMAGE_SIZE = "1K";
+const MAX_STYLE_IMAGE_BYTES = 20 * 1024 * 1024;
 
 function getWebpQuality() {
   const q = parseInt(process.env.WEBP_QUALITY || "", 10);
@@ -134,13 +143,83 @@ function resolveGenParams(opts = {}) {
   };
 }
 
-// 不传 style 时不改提示词。传入风格 id 才追加固定视觉提示词。
+// 调用里的 style 优先。没传时用 IMAGE_STYLE。显式 none 这一次不套风格。
 function applyStyle(prompt, styleArg) {
   const selected = resolveStyleSelection(styleArg);
   return {
     prompt: composeStyledPrompt(prompt, selected.style),
     style: selected.id,
+    styleOrigin: selected.origin,
   };
+}
+
+export async function loadStyleReference(source) {
+  const located = classifyStyleImageSource(source);
+  if (located.kind === "empty") throw new Error("Image path or URL is required.");
+  if (located.kind === "rejected") {
+    throw new Error("Image must be a local file path or an http(s) URL.");
+  }
+
+  let buffer;
+  if (located.kind === "url") {
+    const { default: axios } = await import("axios");
+    const proxyConfig = await getAxiosProxyConfig();
+    const response = await axios.get(located.source, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      maxContentLength: MAX_STYLE_IMAGE_BYTES,
+      maxBodyLength: MAX_STYLE_IMAGE_BYTES,
+      ...proxyConfig,
+    });
+    buffer = Buffer.from(response.data);
+  } else {
+    if (!fs.existsSync(located.source)) throw new Error(`File not found: ${located.source}`);
+    const stat = fs.statSync(located.source);
+    if (!stat.isFile()) throw new Error(`Not a file: ${located.source}`);
+    if (stat.size > MAX_STYLE_IMAGE_BYTES) throw new Error("Image is larger than 20MB.");
+    buffer = fs.readFileSync(located.source);
+  }
+  if (buffer.length > MAX_STYLE_IMAGE_BYTES) throw new Error("Image is larger than 20MB.");
+
+  try {
+    const jpeg = await sharp(buffer)
+      .rotate()
+      .resize({ width: 1280, height: 1280, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    return { data: jpeg.toString("base64"), mimeType: "image/jpeg" };
+  } catch (error) {
+    throw new Error(`Could not read that image: ${error.message}`);
+  }
+}
+
+async function extractStylePrompt(source) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is required to extract a style from an image.");
+  }
+  await ensureFetchProxy();
+  const image = await loadStyleReference(source);
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    httpOptions: buildGeminiHttpOptions(),
+  });
+  const response = await ai.models.generateContent({
+    model: process.env.GEMINI_VISION_MODEL || DEFAULT_VISION_MODEL,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: STYLE_EXTRACTION_INSTRUCTION },
+          { inlineData: { mimeType: image.mimeType, data: image.data } },
+        ],
+      },
+    ],
+  });
+  return assertUsableStylePrompt(response.text || "");
+}
+
+export async function saveImageStyle({ name, prompt, image }) {
+  return saveCustomStyleInput({ name, prompt, image, extract: extractStylePrompt });
 }
 
 async function generateImage(prompt, outputPath, params) {
@@ -322,7 +401,7 @@ async function generate_image({
   fs.unlinkSync(rawPath);
   fs.unlinkSync(webpPath);
 
-  return { url, size, ...gen, style: styled.style };
+  return { url, size, ...gen, style: styled.style, styleOrigin: styled.styleOrigin };
 }
 
 // ====== 生成博客封面 ======
@@ -351,7 +430,7 @@ async function generate_blog_cover({
   fs.unlinkSync(rawPath);
   fs.unlinkSync(webpPath);
 
-  return { url, size, ...gen, style: styled.style };
+  return { url, size, ...gen, style: styled.style, styleOrigin: styled.styleOrigin };
 }
 
 // 只生图并写成 WebP，不上传。供示例图脚本使用。
@@ -372,7 +451,7 @@ export async function renderStyledWebp({
     .webp({ quality: 75 })
     .toFile(outputPath);
   fs.unlinkSync(rawPath);
-  return { ...gen, style: styled.style, bytes: fs.statSync(outputPath).size };
+  return { ...gen, style: styled.style, styleOrigin: styled.styleOrigin, bytes: fs.statSync(outputPath).size };
 }
 
 // ====== MCP 服务器 ======
@@ -380,7 +459,7 @@ export async function renderStyledWebp({
 const server = new Server(
   {
     name: "banana-image-mcp",
-    version: "1.6.0",
+    version: "1.8.0",
   },
   {
     capabilities: {
@@ -501,16 +580,56 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "list_image_styles",
         description:
-          "List preset visual styles for generate_image and generate_blog_cover. Pass id to include that style's fixed prompt.",
+          "List built-in and custom visual styles for generate_image and generate_blog_cover. The result includes globalStyle, the IMAGE_STYLE this process would use when a call omits style. Pass id to include that style's fixed prompt. Custom styles are stored in the user home directory and survive package updates.",
         inputSchema: {
           type: "object",
           properties: {
             id: {
               type: "string",
               description:
-                "Optional style id or alias, e.g. 'dark-chalkboard' or 'pornhub'. Omit to list every style.",
+                "Optional style id, alias, or custom style name. Omit to list every style.",
             },
           },
+        },
+      },
+      {
+        name: "save_image_style",
+        description:
+          "Save a custom image style on this machine. Pass a name plus either a style prompt, or an image (local path or http(s) URL) whose look is extracted into a style prompt. If both prompt and image are set, the written prompt is saved and the image is not sent. Saving the same name again updates that style and keeps the others. Stored in ~/.banana-image-mcp/styles.json, which package updates do not delete.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Custom style name, e.g. '奶油笔记'. This is the value later passed as style.",
+            },
+            prompt: {
+              type: "string",
+              description:
+                "Fixed visual style prompt: medium, palette, lettering, and layout. Do not include a specific title or topic. Optional when image is set. Wins over image when both are set.",
+            },
+            image: {
+              type: "string",
+              description:
+                "Local image path or http(s) URL. Used only when prompt is empty. A vision model extracts a reusable style prompt from the picture.",
+            },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "delete_image_style",
+        description:
+          "Delete one custom image style saved on this machine. Built-in styles cannot be deleted. Other custom styles stay in ~/.banana-image-mcp/styles.json.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Name or id of the custom style to delete.",
+            },
+          },
+          required: ["name"],
         },
       },
     ],
@@ -523,6 +642,15 @@ const toolHandlers = {
   generate_image,
 };
 
+// 失败时：调用传了 style 就记传入值；没传则记下 IMAGE_STYLE。成功后会被实际生效的 id 覆盖。
+function requestedStyleForHistory(tool, args) {
+  if (tool === "upload_image") return null;
+  const explicit = args.style == null ? "" : String(args.style).trim();
+  if (explicit) return explicit;
+  const globalStyle = String(process.env.IMAGE_STYLE || "").trim();
+  return globalStyle || null;
+}
+
 // 记录一次工具调用的历史（成功/失败、大小、耗时、链接、错误原因）
 async function runWithHistory(tool, args = {}) {
   const start = Date.now();
@@ -531,7 +659,7 @@ async function runWithHistory(tool, args = {}) {
     tool,
     slug: args.slug,
     source: args.source,
-    style: tool === "upload_image" ? null : args.style || null,
+    style: requestedStyleForHistory(tool, args),
   };
   try {
     const result = await toolHandlers[tool](args);
@@ -548,6 +676,7 @@ async function runWithHistory(tool, args = {}) {
     });
     const payload = { url: result.url };
     if (result.style) payload.style = result.style;
+    if (result.styleOrigin) payload.styleOrigin = result.styleOrigin;
     return payload;
   } catch (error) {
     appendHistory({
@@ -565,16 +694,22 @@ async function runWithHistory(tool, args = {}) {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const name = request.params.name;
   const args = request.params.arguments || {};
-  if (name !== "list_image_styles" && !toolHandlers[name]) {
+  const localStyleTools = {
+    list_image_styles: () => describeStyles(args.id),
+    save_image_style: () => saveImageStyle(args),
+    delete_image_style: () => deleteCustomStyle(args.name),
+  };
+  if (!localStyleTools[name] && !toolHandlers[name]) {
     throw new Error(`Unknown tool: ${name}`);
   }
   try {
-    if (name === "list_image_styles") {
+    if (localStyleTools[name]) {
+      const data = await localStyleTools[name]();
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(describeStyles(args.id), null, 2),
+            text: JSON.stringify(data, null, 2),
           },
         ],
       };

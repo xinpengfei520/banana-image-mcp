@@ -16,7 +16,7 @@
 - **支持代理与网关** —— 在无法直接访问 Google Gemini 的网络环境（如中国大陆）下，可通过正向代理（`PROXY_URL`）或自建反向代理网关（`GEMINI_BASE_URL`）访问
 - **可配置生图模型** —— 默认 `gemini-3.1-flash-image-preview`，也可切换为 `gemini-3.1-flash-lite-image`
 - **可配置生图比例与分辨率** —— 如 `16:9` / `1:1` / `9:16`，以及 `1K` / `2K` / `4K`
-- **预设封面风格** —— 传入 `style` 才套用固定风格提示词。不传则保持原来的生图逻辑。例如 `dark-chalkboard`、`pornhub`（橙标大字）
+- **预设封面风格** —— 传入 `style` 才套用固定风格提示词。不传则保持原来的生图逻辑。例如 `dark-chalkboard`、`pornhub`（橙标大字）。也可以把自建风格存到本机，更新 MCP 不会清掉
 - **交互式配置向导** —— 运行 `banana-image-mcp setup` 自动写入配置，无需手动编辑 JSON
 - 支持上传本地图片或网络图片到 CDN（七牛云或阿里云 OSS）
 - 自动转换为 WebP 格式并压缩
@@ -269,7 +269,7 @@ claude mcp add banana-image -- npx -y banana-image-mcp
 |---|---|
 | `banana-image-mcp setup` | 交互式配置向导 |
 | `banana-image-mcp history` | 查看生图历史 / 日志 |
-| `banana-image-mcp styles` | 列出预设风格；`styles --style <id>` 查看该风格的固定提示词 |
+| `banana-image-mcp styles` | 列出风格；`styles --style <id>` 查看提示词；`styles add --prompt` 保存手写提示词；`styles add --image <路径或链接>` 从图片提取风格 |
 | `banana-image-mcp --version` | 打印版本号 |
 | `banana-image-mcp` | 以 stdio 方式运行 MCP 服务（供 MCP 客户端调用） |
 
@@ -308,10 +308,12 @@ npx -y banana-image-mcp history
 | `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image-preview` | 生图模型，也支持 `gemini-3.1-flash-lite-image` |
 | `GEMINI_ASPECT_RATIO` | `16:9` | 生图比例，如 `16:9`、`1:1`、`9:16`、`4:3`、`3:2`、`21:9` |
 | `GEMINI_IMAGE_SIZE` | `1K` | 生图分辨率：`1K`、`2K` 或 `4K` |
+| `IMAGE_STYLE` | （无） | 全局风格 id，由 `banana-image-mcp setup` 写入。单次调用的 `style` 优先。该次传 `none` 则不套全局风格 |
+| `GEMINI_VISION_MODEL` | `gemini-2.5-flash` | 从参考图提取风格提示词时使用的模型。走和生图相同的代理或网关 |
 | `WEBP_QUALITY` | `80` | WebP 压缩质量（1–100） |
 
 > 以上为默认值；`generate_blog_cover` 与 `generate_image` 也支持在调用时传入
-> `model` / `aspectRatio` / `imageSize` 参数，覆盖环境变量的默认设置。`style` 没有环境变量默认值，不传就不套风格。
+> `model` / `aspectRatio` / `imageSize` / `style`。调用里的 `style` 覆盖 `IMAGE_STYLE`。
 
 ### 网络 —— 访问 Gemini 的两种方式
 
@@ -381,9 +383,17 @@ Gemini API 的自建端点（如 Cloudflare Worker）。这种方式下**不要*
 
 ## 预设风格
 
-`generate_image` 和 `generate_blog_cover` 的 `style` 是可选参数。不传、传空字符串，或传 `none`，都走原来的生图逻辑：只把 `prompt` 发给模型。传入合法风格 id 之后，才会在内容提示词后面追加一段固定的风格提示词。
+`generate_image` 和 `generate_blog_cover` 的 `style` 是可选参数。一次调用按下面的顺序决定风格：
 
-主题、标题原文和步骤写在 `prompt` 里。风格只锁定介质、配色、字体和版式。同一个账号如果每次都传同一个 id，封面就会保持统一。
+1. 这次传入的 `style`。
+2. 没有传入时，用 `IMAGE_STYLE`（setup 或环境变量里设置了才有）。
+3. 都没有时，走原来的生图逻辑：只把 `prompt` 发给模型。
+
+这一次传 `none`，就跳过全局风格。传空字符串会落到 `IMAGE_STYLE`。
+
+`banana-image-mcp setup` 会询问全局风格，并把风格 id 写进 MCP 客户端配置的 `IMAGE_STYLE`。直接回车或输入 `none` 表示不设全局风格。setup 会重写整条配置，所以原来保存的 `IMAGE_STYLE` 会被清掉。改完后重启 MCP 客户端。
+
+主题、标题原文和步骤写在 `prompt` 里。风格只锁定介质、配色、字体和版式。账号可以设一个全局风格，某一张图想换样子时，再单独传一个 `style`。
 
 ```bash
 npx -y banana-image-mcp styles
@@ -409,6 +419,41 @@ npx -y banana-image-mcp styles --style dark-chalkboard
 
 也可调用工具 `list_image_styles`。传入 `id` 时会返回完整风格提示词。
 
+### 自定义风格
+
+内置风格都不合适时，可以自己建多条。每条有一个名称和一段风格提示词。保存之后，生图时把这个名称传给 `style`，用法和内置风格一样。
+
+自定义风格写在本机 `~/.banana-image-mcp/styles.json`。这个文件在用户目录里，不在安装包里。更新、重装或换版本 banana-image-mcp 都不会删除它，已经建好的风格会留着。
+
+```bash
+banana-image-mcp styles add --name "奶油笔记" --prompt "Soft cream paper, huge rounded black title, blush pink tape and mint stickers."
+```
+
+如果看到一张图的风格好看，但不想自己写提示词，可以把本地路径或 http(s) 链接交给它。视觉模型只描述画面体系（介质、配色、字体、版式），这段文字会存成风格提示词。图里的主体和标题文字不会写进去。
+
+```bash
+banana-image-mcp styles add --name "奶油笔记" --image ./ref.png
+banana-image-mcp styles add --name "奶油笔记" --image https://example.com/ref.png
+```
+
+`--prompt` 和 `--image` 同时给出时，保存手写提示词，图片不会发给模型。不带参数运行 `styles add` 时，先问名称，再问提示词；提示词直接回车，会再要一张参考图的路径或链接。同名再保存会更新这一条的提示词，其他自定义风格不动。名称不能和内置风格的 id 或别名重复。
+
+MCP 工具是 `save_image_style`（参数 `name`，再加上 `prompt` 或 `image`）。删掉某一条用 `delete_image_style`，或：
+
+```bash
+banana-image-mcp styles remove --name "奶油笔记"
+```
+
+内置风格不能删除。
+
+```json
+{
+  "prompt": "标题「周末咖啡」。一杯拿铁和一扇窗。",
+  "slug": "weekend-coffee",
+  "style": "奶油笔记"
+}
+```
+
 ```json
 {
   "prompt": "标题「AI 提示词指南」。三步流程图：INPUT 键盘，PROCESS 机器人，RESULT 灯泡。",
@@ -419,7 +464,7 @@ npx -y banana-image-mcp styles --style dark-chalkboard
 
 ### 示例
 
-下面每张图使用同一条内容提示词，由本服务调用 `gemini-3.1-flash-image-preview` 生成，比例 `16:9`、分辨率 `1K`。第一张没有传 `style`。其余每张只改了风格 id。
+下面每张图使用同一条内容提示词，由本服务调用 `gemini-3.1-flash-image-preview` 生成，比例 `16:9`、分辨率 `1K`。生成时没有设置 `IMAGE_STYLE`。第一张没有传 `style`。其余每张只改了风格 id。
 
 > The main title at the top says "AI PROMPT GUIDE" in large letters. The image shows a 3-step flowchart with arrows: Step 1 labeled "INPUT" with a keyboard icon, Step 2 labeled "PROCESS" with a cute robot head icon, and Step 3 labeled "RESULT" with a glowing lightbulb icon.
 
@@ -468,18 +513,19 @@ npx -y banana-image-mcp styles --style dark-chalkboard
 | `model` | string | 否 | 模型覆盖（默认：`GEMINI_IMAGE_MODEL` 或 `gemini-3.1-flash-image-preview`） |
 | `aspectRatio` | string | 否 | 生图比例覆盖（默认：`GEMINI_ASPECT_RATIO` 或 `16:9`） |
 | `imageSize` | string | 否 | 分辨率覆盖 `1K`/`2K`/`4K`（默认：`GEMINI_IMAGE_SIZE` 或 `1K`） |
-| `style` | string | 否 | 预设风格 id，如 `dark-chalkboard`、`pornhub`。不传或传 `none` 时不套风格 |
+| `style` | string | 否 | 风格 id。优先于 `IMAGE_STYLE`。不传时使用全局风格；没设全局风格则不套风格。传 `none` 表示这一次跳过全局风格 |
 
 **返回值：**
 
 ```json
 {
   "url": "https://your-cdn-domain.com/blog-cover/20260321-my-post.webp",
-  "style": "dark-chalkboard"
+  "style": "dark-chalkboard",
+  "styleOrigin": "call"
 }
 ```
 
-`style` 只在实际套用了预设时出现。
+`style` 是实际套用的风格 id。`styleOrigin` 为 `call` 表示这次传入了 `style`，为 `global` 表示用的是 `IMAGE_STYLE`。没有套风格时不返回 `style`。这次传了 `none` 时，返回 `styleOrigin: "call"`，没有 `style`。
 
 ### `generate_image`
 
@@ -493,24 +539,43 @@ npx -y banana-image-mcp styles --style dark-chalkboard
 | `model` | string | 否 | 模型覆盖（默认：`GEMINI_IMAGE_MODEL` 或 `gemini-3.1-flash-image-preview`） |
 | `aspectRatio` | string | 否 | 生图比例覆盖（默认：`GEMINI_ASPECT_RATIO` 或 `16:9`） |
 | `imageSize` | string | 否 | 分辨率覆盖 `1K`/`2K`/`4K`（默认：`GEMINI_IMAGE_SIZE` 或 `1K`） |
-| `style` | string | 否 | 预设风格 id，如 `dark-chalkboard`、`pornhub`。不传或传 `none` 时不套风格 |
+| `style` | string | 否 | 风格 id。优先于 `IMAGE_STYLE`。不传时使用全局风格；没设全局风格则不套风格。传 `none` 表示这一次跳过全局风格 |
 
 **返回值：**
 
 ```json
 {
   "url": "https://your-cdn-domain.com/aigc/image/20260321-my-image.webp",
-  "style": "pornhub"
+  "style": "pornhub",
+  "styleOrigin": "global"
 }
 ```
 
 ### `list_image_styles`
 
-列出预设风格。传入 `id`（或别名）时附上该风格的固定提示词。
+列出内置风格和本机自定义风格。结果里的 `globalStyle` 是当前进程在不传 `style` 时会使用的 `IMAGE_STYLE`。传入 `id`（或别名、自定义名称）时附上该风格的固定提示词。`IMAGE_STYLE` 无法识别时写在 `globalStyle.error` 里，风格目录仍然返回。
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | 否 | 风格 id 或别名。省略则返回全部风格的名称和简介 |
+| `id` | string | 否 | 风格 id、别名或自定义名称。省略则返回全部风格 |
+
+### `save_image_style`
+
+把一条自定义风格保存到 `~/.banana-image-mcp/styles.json`。可以手写提示词，也可以给一张图，由模型提取风格提示词。同名再次调用会更新这一条，其他风格保留。
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `name` | string | 是 | 风格名称。之后作为 `style` 传入 |
+| `prompt` | string | 否 | 固定风格提示词，只写介质、配色、字体和版式。没给 `image` 时必填。两者都有时以它为准 |
+| `image` | string | 否 | 本地路径或 http(s) 链接。只在 `prompt` 为空时使用，由视觉模型写成风格提示词 |
+
+### `delete_image_style`
+
+删除一条自定义风格。内置风格不能删。
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `name` | string | 是 | 要删除的自定义风格名称或 id |
 
 ### `upload_image`
 

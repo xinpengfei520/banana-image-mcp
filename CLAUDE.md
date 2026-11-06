@@ -14,8 +14,9 @@ The main export is `generate_blog_cover()` which orchestrates the full pipeline:
 ## Architecture
 
 **MCP server** (`index.js`):
-- Exposes four MCP tools: `generate_blog_cover`, `generate_image`, `upload_image`, `list_image_styles`
-- Preset cover styles live in `styles.js`. A call appends a fixed style prompt only when `style` is set. Omitting `style` (or passing `none`) sends the prompt unchanged. `banana-image-mcp styles` lists the presets
+- Exposes six MCP tools: `generate_blog_cover`, `generate_image`, `upload_image`, `list_image_styles`, `save_image_style`, `delete_image_style`
+- Preset cover styles live in `styles.js`. Resolution is call `style`, then `IMAGE_STYLE`, then no style. Explicit `none` skips the global style for that call. `banana-image-mcp styles` lists the presets and the global style of the current process
+- Custom styles are saved to `~/.banana-image-mcp/styles.json` (`custom-styles.js`). That file is outside the package, so an update does not delete styles the user created. Same-name saves update one style. Built-in ids cannot be overwritten or deleted. A custom style can be a written prompt, or extracted from a local image path / http(s) URL by `style-extract.js` plus a Gemini vision call in `index.js` (`GEMINI_VISION_MODEL`, default `gemini-2.5-flash`). A written prompt wins when both are given
 - Uses ES modules (import/export syntax)
 - Temporary files stored in system temp directory (`os.tmpdir()/banana-image-mcp/`)
 - File naming: `YYYYMMDD-{slug}.webp`
@@ -24,6 +25,7 @@ The main export is `generate_blog_cover()` which orchestrates the full pipeline:
 **Config wizard** (`cli-setup.js`):
 - Loaded lazily when the binary is invoked as `banana-image-mcp setup`
 - Interactive readline prompts; multi-select one or more targets (Claude Code / Claude Desktop / Cursor / Codex / custom JSON path), writes/merges the `banana-image` entry into each, backing up existing files first
+- Asks for a global style and writes `IMAGE_STYLE` when one is chosen. Enter or `none` omits the key, which clears a previously saved `IMAGE_STYLE` because the entry is rewritten
 - JSON clients use `mcpServers`; Codex uses `~/.codex/config.toml` (`[mcp_servers.banana-image]`), edited via surgical block replace (preserves other sections/comments) with `smol-toml` for validation/detection
 
 **History** (`history-store.js` + `cli-history.js`):
@@ -48,8 +50,10 @@ Image generation (optional, with defaults):
 - `GEMINI_IMAGE_MODEL` - image model (default `gemini-3.1-flash-image-preview`; also `gemini-3.1-flash-lite-image`)
 - `GEMINI_ASPECT_RATIO` - aspect ratio (default `16:9`; e.g. `1:1`, `9:16`, `4:3`, `3:2`, `21:9`)
 - `GEMINI_IMAGE_SIZE` - resolution (default `1K`; also `2K`, `4K`)
+- `IMAGE_STYLE` - optional global style id (set by `banana-image-mcp setup`). A per-call `style` wins. Call-time `none` skips it
+- `GEMINI_VISION_MODEL` - vision model for extracting a style prompt from a reference image (default `gemini-2.5-flash`)
 - `WEBP_QUALITY` - WebP quality 1–100 (default `80`)
-- `generate_blog_cover` / `generate_image` also accept per-call `model` / `aspectRatio` / `imageSize` args that override the env defaults, plus an optional `style` id. There is no default style env
+- `generate_blog_cover` / `generate_image` also accept per-call `model` / `aspectRatio` / `imageSize` / `style` args that override the env defaults. Generate results include `style` and `styleOrigin` (`call` or `global`)
 
 Network — two independent ways to reach Gemini (optional):
 - `PROXY_URL` - HTTP/HTTPS **forward proxy** (falls back to `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`); supports `http://user:pass@host:port` auth; HTTP-only (no SOCKS). Node's fetch ignores OS system-proxy settings, so a forward proxy or transparent TUN is required.
@@ -84,6 +88,6 @@ This module is designed to be loaded by an MCP host (like Claude Desktop). It's 
 - **Upload path**: Images stored at `blog-cover/{YYYYMMDD-slug}.webp` on Qiniu (default; per-tool `path` overrides)
 - **Cleanup**: Both raw PNG and compressed WebP are deleted after successful upload
 - **Setup wizard**: `banana-image-mcp setup` writes/merges config into one or more client files with backups (see `cli-setup.js`)
-- **Styles**: preset ids in `styles.js`; list via `banana-image-mcp styles` or the `list_image_styles` tool. Sample covers for the same prompt live in `docs/style-examples/` and are embedded in both READMEs. Omitting `style` matches `docs/style-examples/none.webp`
+- **Styles**: preset ids in `styles.js`; list via `banana-image-mcp styles` or the `list_image_styles` tool. Sample covers for the same prompt live in `docs/style-examples/` and are embedded in both READMEs. Those samples were generated with no `IMAGE_STYLE`; the first omits `style` (`docs/style-examples/none.webp`)
 - **History**: generation log at `~/.banana-image-mcp/history.jsonl`; view via `banana-image-mcp history`
 - **Distribution**: Published to npm as `banana-image-mcp`, users can run via `npx -y banana-image-mcp`

@@ -1,6 +1,6 @@
 {
   "name": "banana-image-mcp",
-  "version": "1.6.0",
+  "version": "1.8.0",
   "type": "module",
   "main": "index.js",
   "bin": {
@@ -36,6 +36,8 @@
   "files": [
     "index.js",
     "styles.js",
+    "style-extract.js",
+    "custom-styles.js",
     "cli-setup.js",
     "cli-styles.js",
     "cli-history.js",
