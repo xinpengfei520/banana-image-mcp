@@ -16,6 +16,7 @@
 - **支持代理与网关** —— 在无法直接访问 Google Gemini 的网络环境（如中国大陆）下，可通过正向代理（`PROXY_URL`）或自建反向代理网关（`GEMINI_BASE_URL`）访问
 - **可配置生图模型** —— 默认 `gemini-3.1-flash-image-preview`，也可切换为 `gemini-3.1-flash-lite-image`
 - **可配置生图比例与分辨率** —— 如 `16:9` / `1:1` / `9:16`，以及 `1K` / `2K` / `4K`
+- **预设封面风格** —— 传入 `style` 才套用固定风格提示词。不传则保持原来的生图逻辑。例如 `dark-chalkboard`、`pornhub`（橙标大字）
 - **交互式配置向导** —— 运行 `banana-image-mcp setup` 自动写入配置，无需手动编辑 JSON
 - 支持上传本地图片或网络图片到 CDN（七牛云或阿里云 OSS）
 - 自动转换为 WebP 格式并压缩
@@ -268,6 +269,7 @@ claude mcp add banana-image -- npx -y banana-image-mcp
 |---|---|
 | `banana-image-mcp setup` | 交互式配置向导 |
 | `banana-image-mcp history` | 查看生图历史 / 日志 |
+| `banana-image-mcp styles` | 列出预设风格；`styles --style <id>` 查看该风格的固定提示词 |
 | `banana-image-mcp --version` | 打印版本号 |
 | `banana-image-mcp` | 以 stdio 方式运行 MCP 服务（供 MCP 客户端调用） |
 
@@ -280,7 +282,7 @@ claude mcp add banana-image -- npx -y banana-image-mcp
 npx -y banana-image-mcp history
 ```
 
-显示 日期时间、结果（成功/失败）、类型、**模型**、图片大小、生成耗时、图片链接（或失败原因）。
+显示日期时间、结果（成功/失败）、类型、**模型**、**风格**、图片大小、生成耗时、图片链接（或失败原因）。
 默认展示最近 10 条；在交互式终端中可用 **↑/↓**（或 `j`/`k`）向下/向上翻页，按 `q` 退出。
 
 ```
@@ -309,7 +311,7 @@ npx -y banana-image-mcp history
 | `WEBP_QUALITY` | `80` | WebP 压缩质量（1–100） |
 
 > 以上为默认值；`generate_blog_cover` 与 `generate_image` 也支持在调用时传入
-> `model` / `aspectRatio` / `imageSize` 参数，覆盖环境变量的默认设置。
+> `model` / `aspectRatio` / `imageSize` 参数，覆盖环境变量的默认设置。`style` 没有环境变量默认值，不传就不套风格。
 
 ### 网络 —— 访问 Gemini 的两种方式
 
@@ -377,6 +379,81 @@ Gemini API 的自建端点（如 Cloudflare Worker）。这种方式下**不要*
 3. 在 AccessKey 管理页面获取 AccessKey ID 和 AccessKey Secret
 4. 记录存储空间所在区域（如 `oss-cn-hangzhou`）
 
+## 预设风格
+
+`generate_image` 和 `generate_blog_cover` 的 `style` 是可选参数。不传、传空字符串，或传 `none`，都走原来的生图逻辑：只把 `prompt` 发给模型。传入合法风格 id 之后，才会在内容提示词后面追加一段固定的风格提示词。
+
+主题、标题原文和步骤写在 `prompt` 里。风格只锁定介质、配色、字体和版式。同一个账号如果每次都传同一个 id，封面就会保持统一。
+
+```bash
+npx -y banana-image-mcp styles
+npx -y banana-image-mcp styles --style dark-chalkboard
+```
+
+| id | 风格 | 适合 |
+|---|---|---|
+| `dark-chalkboard` | 深色粉笔黑板 | 教程、流程图、清单 |
+| `pornhub` | 橙标大字（纯黑底，白字加橙色圆角标） | 要强识别度的标题封面 |
+| `xiaohongshu` | 小红书笔记 | 生活方式、种草封面 |
+| `big-type` | 大字报 | 信息流里必须一眼读完的标题 |
+| `wechat-editorial` | 公众号头图 | 头条封面、专栏、长文 |
+| `premium-dark` | 暗金课程 | 课程、知识付费 |
+| `bold-thumbnail` | 色块视频封面 | 视频缩略图 |
+| `liquid-glass` | 液态玻璃 | 科技产品、工具 |
+| `clay-3d` | 黏土三维 | 讲解、轻松主题 |
+| `ink-wash` | 水墨留白 | 文化、随笔 |
+| `paper-cut` | 层叠纸雕 | 生活方式、节日 |
+| `brutalist` | 瑞士粗野海报 | 设计、观点 |
+
+`pornhub` 只描述那套黑底橙标的词标版式，不生成照片。别名 `orange-wordmark`、`橙标` 指向同一风格。`dark-chalkboard` 沿用深色石板、白粉笔标题、粉彩黄绿粉、勾和星；具体标题和步骤写在 `prompt` 里，不会被风格写死。
+
+也可调用工具 `list_image_styles`。传入 `id` 时会返回完整风格提示词。
+
+```json
+{
+  "prompt": "标题「AI 提示词指南」。三步流程图：INPUT 键盘，PROCESS 机器人，RESULT 灯泡。",
+  "slug": "ai-prompt-guide",
+  "style": "dark-chalkboard"
+}
+```
+
+### 示例
+
+下面每张图使用同一条内容提示词，由本服务调用 `gemini-3.1-flash-image-preview` 生成，比例 `16:9`、分辨率 `1K`。第一张没有传 `style`。其余每张只改了风格 id。
+
+> The main title at the top says "AI PROMPT GUIDE" in large letters. The image shows a 3-step flowchart with arrows: Step 1 labeled "INPUT" with a keyboard icon, Step 2 labeled "PROCESS" with a cute robot head icon, and Step 3 labeled "RESULT" with a glowing lightbulb icon.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/style-examples/none.webp" alt="不传 style" width="420"><br>不传 style</td>
+    <td align="center"><img src="docs/style-examples/dark-chalkboard.webp" alt="dark-chalkboard" width="420"><br><code>dark-chalkboard</code> 深色粉笔黑板</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/style-examples/pornhub.webp" alt="pornhub" width="420"><br><code>pornhub</code> 橙标大字</td>
+    <td align="center"><img src="docs/style-examples/xiaohongshu.webp" alt="xiaohongshu" width="420"><br><code>xiaohongshu</code> 小红书笔记</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/style-examples/big-type.webp" alt="big-type" width="420"><br><code>big-type</code> 大字报</td>
+    <td align="center"><img src="docs/style-examples/wechat-editorial.webp" alt="wechat-editorial" width="420"><br><code>wechat-editorial</code> 公众号头图</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/style-examples/premium-dark.webp" alt="premium-dark" width="420"><br><code>premium-dark</code> 暗金课程</td>
+    <td align="center"><img src="docs/style-examples/bold-thumbnail.webp" alt="bold-thumbnail" width="420"><br><code>bold-thumbnail</code> 色块视频封面</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/style-examples/liquid-glass.webp" alt="liquid-glass" width="420"><br><code>liquid-glass</code> 液态玻璃</td>
+    <td align="center"><img src="docs/style-examples/clay-3d.webp" alt="clay-3d" width="420"><br><code>clay-3d</code> 黏土三维</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/style-examples/ink-wash.webp" alt="ink-wash" width="420"><br><code>ink-wash</code> 水墨留白</td>
+    <td align="center"><img src="docs/style-examples/paper-cut.webp" alt="paper-cut" width="420"><br><code>paper-cut</code> 层叠纸雕</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/style-examples/brutalist.webp" alt="brutalist" width="420"><br><code>brutalist</code> 瑞士粗野海报</td>
+    <td></td>
+  </tr>
+</table>
+
 ## 工具
 
 ### `generate_blog_cover`
@@ -391,14 +468,18 @@ Gemini API 的自建端点（如 Cloudflare Worker）。这种方式下**不要*
 | `model` | string | 否 | 模型覆盖（默认：`GEMINI_IMAGE_MODEL` 或 `gemini-3.1-flash-image-preview`） |
 | `aspectRatio` | string | 否 | 生图比例覆盖（默认：`GEMINI_ASPECT_RATIO` 或 `16:9`） |
 | `imageSize` | string | 否 | 分辨率覆盖 `1K`/`2K`/`4K`（默认：`GEMINI_IMAGE_SIZE` 或 `1K`） |
+| `style` | string | 否 | 预设风格 id，如 `dark-chalkboard`、`pornhub`。不传或传 `none` 时不套风格 |
 
 **返回值：**
 
 ```json
 {
-  "url": "https://your-cdn-domain.com/blog-cover/20260321-my-post.webp"
+  "url": "https://your-cdn-domain.com/blog-cover/20260321-my-post.webp",
+  "style": "dark-chalkboard"
 }
 ```
+
+`style` 只在实际套用了预设时出现。
 
 ### `generate_image`
 
@@ -412,14 +493,24 @@ Gemini API 的自建端点（如 Cloudflare Worker）。这种方式下**不要*
 | `model` | string | 否 | 模型覆盖（默认：`GEMINI_IMAGE_MODEL` 或 `gemini-3.1-flash-image-preview`） |
 | `aspectRatio` | string | 否 | 生图比例覆盖（默认：`GEMINI_ASPECT_RATIO` 或 `16:9`） |
 | `imageSize` | string | 否 | 分辨率覆盖 `1K`/`2K`/`4K`（默认：`GEMINI_IMAGE_SIZE` 或 `1K`） |
+| `style` | string | 否 | 预设风格 id，如 `dark-chalkboard`、`pornhub`。不传或传 `none` 时不套风格 |
 
 **返回值：**
 
 ```json
 {
-  "url": "https://your-cdn-domain.com/aigc/image/20260321-my-image.webp"
+  "url": "https://your-cdn-domain.com/aigc/image/20260321-my-image.webp",
+  "style": "pornhub"
 }
 ```
+
+### `list_image_styles`
+
+列出预设风格。传入 `id`（或别名）时附上该风格的固定提示词。
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `id` | string | 否 | 风格 id 或别名。省略则返回全部风格的名称和简介 |
 
 ### `upload_image`
 
@@ -442,7 +533,7 @@ Gemini API 的自建端点（如 Cloudflare Worker）。这种方式下**不要*
 ## 架构
 
 ```
-提示词 → Google Gemini API (PNG) → Sharp (WebP) → CDN（七牛云 / 阿里云 OSS） → URL
+提示词 + 可选风格提示词 → Google Gemini API (PNG) → Sharp (WebP) → CDN（七牛云 / 阿里云 OSS） → URL
 图片源 (本地/网络) ──────────→ Sharp (WebP) → CDN（七牛云 / 阿里云 OSS） → URL
 ```
 

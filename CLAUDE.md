@@ -14,7 +14,8 @@ The main export is `generate_blog_cover()` which orchestrates the full pipeline:
 ## Architecture
 
 **MCP server** (`index.js`):
-- Exposes three MCP tools: `generate_blog_cover`, `generate_image`, `upload_image`
+- Exposes four MCP tools: `generate_blog_cover`, `generate_image`, `upload_image`, `list_image_styles`
+- Preset cover styles live in `styles.js`. A call appends a fixed style prompt only when `style` is set. Omitting `style` (or passing `none`) sends the prompt unchanged. `banana-image-mcp styles` lists the presets
 - Uses ES modules (import/export syntax)
 - Temporary files stored in system temp directory (`os.tmpdir()/banana-image-mcp/`)
 - File naming: `YYYYMMDD-{slug}.webp`
@@ -26,12 +27,12 @@ The main export is `generate_blog_cover()` which orchestrates the full pipeline:
 - JSON clients use `mcpServers`; Codex uses `~/.codex/config.toml` (`[mcp_servers.banana-image]`), edited via surgical block replace (preserves other sections/comments) with `smol-toml` for validation/detection
 
 **History** (`history-store.js` + `cli-history.js`):
-- Every tool call is appended to `~/.banana-image-mcp/history.jsonl` (time, tool, status, size, duration, url, error, model/aspectRatio/imageSize) via `runWithHistory()` in `index.js` — logging failures never break the tool
-- `banana-image-mcp history` renders a paginated, colorized table (columns: #, time, result, tool type, model, size, duration, url/error; latest first; ↑/↓ paging in a TTY)
+- Every tool call is appended to `~/.banana-image-mcp/history.jsonl` (time, tool, status, size, duration, url, error, model/aspectRatio/imageSize/style) via `runWithHistory()` in `index.js` — logging failures never break the tool
+- `banana-image-mcp history` renders a paginated, colorized table (columns: #, time, result, tool type, model, style, size, duration, url/error; latest first; ↑/↓ paging in a TTY)
 
 **Data flow**:
 ```
-prompt → Gemini API (PNG) → Sharp (WebP) → CDN (Qiniu / Aliyun OSS) → URL
+prompt + optional style prompt → Gemini API (PNG) → Sharp (WebP) → CDN (Qiniu / Aliyun OSS) → URL
           (via proxy)          ↓              ↓
                             tmpdir/        tmpdir/
                           (cleaned up after upload)
@@ -48,7 +49,7 @@ Image generation (optional, with defaults):
 - `GEMINI_ASPECT_RATIO` - aspect ratio (default `16:9`; e.g. `1:1`, `9:16`, `4:3`, `3:2`, `21:9`)
 - `GEMINI_IMAGE_SIZE` - resolution (default `1K`; also `2K`, `4K`)
 - `WEBP_QUALITY` - WebP quality 1–100 (default `80`)
-- `generate_blog_cover` / `generate_image` also accept per-call `model` / `aspectRatio` / `imageSize` args that override the env defaults
+- `generate_blog_cover` / `generate_image` also accept per-call `model` / `aspectRatio` / `imageSize` args that override the env defaults, plus an optional `style` id. There is no default style env
 
 Network — two independent ways to reach Gemini (optional):
 - `PROXY_URL` - HTTP/HTTPS **forward proxy** (falls back to `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`); supports `http://user:pass@host:port` auth; HTTP-only (no SOCKS). Node's fetch ignores OS system-proxy settings, so a forward proxy or transparent TUN is required.
@@ -83,5 +84,6 @@ This module is designed to be loaded by an MCP host (like Claude Desktop). It's 
 - **Upload path**: Images stored at `blog-cover/{YYYYMMDD-slug}.webp` on Qiniu (default; per-tool `path` overrides)
 - **Cleanup**: Both raw PNG and compressed WebP are deleted after successful upload
 - **Setup wizard**: `banana-image-mcp setup` writes/merges config into one or more client files with backups (see `cli-setup.js`)
+- **Styles**: preset ids in `styles.js`; list via `banana-image-mcp styles` or the `list_image_styles` tool. Sample covers for the same prompt live in `docs/style-examples/` and are embedded in both READMEs. Omitting `style` matches `docs/style-examples/none.webp`
 - **History**: generation log at `~/.banana-image-mcp/history.jsonl`; view via `banana-image-mcp history`
 - **Distribution**: Published to npm as `banana-image-mcp`, users can run via `npx -y banana-image-mcp`

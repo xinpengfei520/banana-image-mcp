@@ -2,6 +2,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { fileURLToPath } from "url";
 import sharp from "sharp";
 import qiniu from "qiniu";
 import OSS from "ali-oss";
@@ -14,6 +15,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import dotenv from "dotenv";
 import { appendHistory } from "./history-store.js";
+import {
+  composeStyledPrompt,
+  describeStyles,
+  resolveStyleSelection,
+  styleParamDescription,
+} from "./styles.js";
 
 dotenv.config({ override: false });
 
@@ -124,6 +131,15 @@ function resolveGenParams(opts = {}) {
       opts.aspectRatio || process.env.GEMINI_ASPECT_RATIO || DEFAULT_ASPECT_RATIO,
     imageSize:
       opts.imageSize || process.env.GEMINI_IMAGE_SIZE || DEFAULT_IMAGE_SIZE,
+  };
+}
+
+// 不传 style 时不改提示词。传入风格 id 才追加固定视觉提示词。
+function applyStyle(prompt, styleArg) {
+  const selected = resolveStyleSelection(styleArg);
+  return {
+    prompt: composeStyledPrompt(prompt, selected.style),
+    style: selected.id,
   };
 }
 
@@ -290,13 +306,15 @@ async function generate_image({
   model,
   aspectRatio,
   imageSize,
+  style,
 }) {
   const fileName = getFileName(slug);
   const rawPath = path.join(TMP_DIR, `${fileName}.png`);
   const webpPath = path.join(TMP_DIR, `${fileName}.webp`);
 
   const gen = resolveGenParams({ model, aspectRatio, imageSize });
-  await generateImage(prompt, rawPath, gen);
+  const styled = applyStyle(prompt, style);
+  await generateImage(styled.prompt, rawPath, gen);
   await sharp(rawPath).webp({ quality: getWebpQuality() }).toFile(webpPath);
   const size = fs.statSync(webpPath).size;
   const url = await uploadFile(webpPath, fileName, uploadPath);
@@ -304,7 +322,7 @@ async function generate_image({
   fs.unlinkSync(rawPath);
   fs.unlinkSync(webpPath);
 
-  return { url, size, ...gen };
+  return { url, size, ...gen, style: styled.style };
 }
 
 // ====== 生成博客封面 ======
@@ -316,6 +334,7 @@ async function generate_blog_cover({
   model,
   aspectRatio,
   imageSize,
+  style,
 }) {
   const fileName = getFileName(slug);
 
@@ -323,7 +342,8 @@ async function generate_blog_cover({
   const webpPath = path.join(TMP_DIR, `${fileName}.webp`);
 
   const gen = resolveGenParams({ model, aspectRatio, imageSize });
-  await generateImage(prompt, rawPath, gen);
+  const styled = applyStyle(prompt, style);
+  await generateImage(styled.prompt, rawPath, gen);
   await convertToWebp(rawPath, webpPath);
   const size = fs.statSync(webpPath).size;
   const url = await uploadFile(webpPath, fileName, uploadPath);
@@ -331,7 +351,28 @@ async function generate_blog_cover({
   fs.unlinkSync(rawPath);
   fs.unlinkSync(webpPath);
 
-  return { url, size, ...gen };
+  return { url, size, ...gen, style: styled.style };
+}
+
+// 只生图并写成 WebP，不上传。供示例图脚本使用。
+export async function renderStyledWebp({
+  prompt,
+  style,
+  outputPath,
+  model,
+  aspectRatio,
+  imageSize,
+}) {
+  const gen = resolveGenParams({ model, aspectRatio, imageSize });
+  const styled = applyStyle(prompt, style);
+  const rawPath = `${outputPath}.png`;
+  await generateImage(styled.prompt, rawPath, gen);
+  await sharp(rawPath)
+    .resize({ width: 1200, withoutEnlargement: true })
+    .webp({ quality: 75 })
+    .toFile(outputPath);
+  fs.unlinkSync(rawPath);
+  return { ...gen, style: styled.style, bytes: fs.statSync(outputPath).size };
 }
 
 // ====== MCP 服务器 ======
@@ -339,7 +380,7 @@ async function generate_blog_cover({
 const server = new Server(
   {
     name: "banana-image-mcp",
-    version: "1.5.0",
+    version: "1.6.0",
   },
   {
     capabilities: {
@@ -347,6 +388,11 @@ const server = new Server(
     },
   }
 );
+
+const STYLE_PARAM = {
+  type: "string",
+  description: styleParamDescription(),
+};
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -359,7 +405,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             prompt: {
               type: "string",
-              description: "The text prompt describing the image to generate",
+              description: "What to draw: subject, scene, and any exact title text. Visual treatment comes from style when set.",
             },
             slug: {
               type: "string",
@@ -385,6 +431,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description:
                 "Resolution override: '1K', '2K' or '4K' (default: env GEMINI_IMAGE_SIZE or '1K')",
             },
+            style: STYLE_PARAM,
           },
           required: ["prompt", "slug"],
         },
@@ -420,7 +467,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             prompt: {
               type: "string",
-              description: "The text prompt describing the image to generate",
+              description: "What to draw: subject, scene, and any exact title text. Visual treatment comes from style when set.",
             },
             slug: {
               type: "string",
@@ -446,8 +493,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description:
                 "Resolution override: '1K', '2K' or '4K' (default: env GEMINI_IMAGE_SIZE or '1K')",
             },
+            style: STYLE_PARAM,
           },
           required: ["prompt", "slug"],
+        },
+      },
+      {
+        name: "list_image_styles",
+        description:
+          "List preset visual styles for generate_image and generate_blog_cover. Pass id to include that style's fixed prompt.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "Optional style id or alias, e.g. 'dark-chalkboard' or 'pornhub'. Omit to list every style.",
+            },
+          },
         },
       },
     ],
@@ -468,6 +531,7 @@ async function runWithHistory(tool, args = {}) {
     tool,
     slug: args.slug,
     source: args.source,
+    style: tool === "upload_image" ? null : args.style || null,
   };
   try {
     const result = await toolHandlers[tool](args);
@@ -480,8 +544,11 @@ async function runWithHistory(tool, args = {}) {
       model: result.model ?? null,
       aspectRatio: result.aspectRatio ?? null,
       imageSize: result.imageSize ?? null,
+      style: result.style ?? null,
     });
-    return { url: result.url };
+    const payload = { url: result.url };
+    if (result.style) payload.style = result.style;
+    return payload;
   } catch (error) {
     appendHistory({
       ...base,
@@ -496,14 +563,23 @@ async function runWithHistory(tool, args = {}) {
 }
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (!toolHandlers[request.params.name]) {
-    throw new Error(`Unknown tool: ${request.params.name}`);
+  const name = request.params.name;
+  const args = request.params.arguments || {};
+  if (name !== "list_image_styles" && !toolHandlers[name]) {
+    throw new Error(`Unknown tool: ${name}`);
   }
   try {
-    const result = await runWithHistory(
-      request.params.name,
-      request.params.arguments
-    );
+    if (name === "list_image_styles") {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(describeStyles(args.id), null, 2),
+          },
+        ],
+      };
+    }
+    const result = await runWithHistory(name, args);
     return {
       content: [
         {
@@ -542,6 +618,13 @@ async function main() {
     return;
   }
 
+  // 预设风格目录：banana-image-mcp styles [--style <id>]
+  if (command === "styles" || command === "style") {
+    const { runStylesCli } = await import("./cli-styles.js");
+    await runStylesCli(process.argv.slice(3));
+    return;
+  }
+
   // 显示版本：banana-image-mcp --version / -v
   if (command === "--version" || command === "-v") {
     const pkg = JSON.parse(
@@ -555,4 +638,16 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch(console.error);
+function isInvokedDirectly() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return fs.realpathSync(entry) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isInvokedDirectly()) {
+  main().catch(console.error);
+}

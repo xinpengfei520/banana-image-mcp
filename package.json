@@ -1,13 +1,14 @@
 {
   "name": "banana-image-mcp",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "type": "module",
   "main": "index.js",
   "bin": {
     "banana-image-mcp": "index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test test-styles.js"
   },
   "keywords": [
     "mcp",
@@ -34,11 +35,14 @@
   },
   "files": [
     "index.js",
+    "styles.js",
     "cli-setup.js",
+    "cli-styles.js",
     "cli-history.js",
     "history-store.js",
     "README.md",
     "README_CN.md",
+    "docs/style-examples",
     "LICENSE"
   ],
   "engines": {
