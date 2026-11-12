@@ -16,7 +16,7 @@ The main export is `generate_blog_cover()` which orchestrates the full pipeline:
 **MCP server** (`index.js`):
 - Exposes six MCP tools: `generate_blog_cover`, `generate_image`, `upload_image`, `list_image_styles`, `save_image_style`, `delete_image_style`
 - Preset cover styles live in `styles.js`. Resolution is call `style`, then `IMAGE_STYLE`, then no style. Explicit `none` skips the global style for that call. `banana-image-mcp styles` lists the presets and the global style of the current process
-- Custom styles are saved to `~/.banana-image-mcp/styles.json` (`custom-styles.js`). That file is outside the package, so an update does not delete styles the user created. Same-name saves update one style. Built-in ids cannot be overwritten or deleted. A custom style can be a written prompt, or extracted from a local image path / http(s) URL by `style-extract.js` plus a Gemini vision call in `index.js` (`GEMINI_VISION_MODEL`, default `gemini-2.5-flash`). A written prompt wins when both are given
+- Custom styles are saved to `~/.banana-image-mcp/styles.json` (`custom-styles.js`). That file is outside the package, so an update does not delete styles the user created. Same-name saves update one style. Built-in ids cannot be overwritten or deleted. A custom style can be a written prompt, or extracted from a local image path / http(s) URL by `style-extract.js` plus a Gemini vision call in `index.js` (`GEMINI_VISION_MODEL`, default `gemini-3.8-flash`). A written prompt wins when both are given
 - Uses ES modules (import/export syntax)
 - Temporary files stored in system temp directory (`os.tmpdir()/banana-image-mcp/`)
 - File naming: `YYYYMMDD-{slug}.webp`
@@ -46,12 +46,14 @@ Required (set via MCP client config or `.env`):
 - `GEMINI_API_KEY` - Google Gemini API key
 - `UPLOAD_PROVIDER` - Upload provider: `qiniu` (default) or `aliyun`
 
+> The CLI (`styles`, `history`, `setup`) runs as its own process, separate from the MCP server. It reads `process.env` plus a `.env` in the **current working directory** only (`dotenv.config({ quiet: true })`). The `env` block in an MCP client config is not inherited, so `styles add --image` fails without `GEMINI_API_KEY` exported in the shell or present in `./.env`. `styles add --prompt` needs no key.
+
 Image generation (optional, with defaults):
 - `GEMINI_IMAGE_MODEL` - image model (default `gemini-3.1-flash-image-preview`; also `gemini-3.1-flash-lite-image`)
 - `GEMINI_ASPECT_RATIO` - aspect ratio (default `16:9`; e.g. `1:1`, `9:16`, `4:3`, `3:2`, `21:9`)
 - `GEMINI_IMAGE_SIZE` - resolution (default `1K`; also `2K`, `4K`)
 - `IMAGE_STYLE` - optional global style id (set by `banana-image-mcp setup`). A per-call `style` wins. Call-time `none` skips it
-- `GEMINI_VISION_MODEL` - vision model for extracting a style prompt from a reference image (default `gemini-2.5-flash`)
+- `GEMINI_VISION_MODEL` - vision model for extracting a style prompt from a reference image (default `gemini-3.8-flash`; `gemini-2.5-flash` is retired for new API keys and returns 404)
 - `WEBP_QUALITY` - WebP quality 1–100 (default `80`)
 - `generate_blog_cover` / `generate_image` also accept per-call `model` / `aspectRatio` / `imageSize` / `style` args that override the env defaults. Generate results include `style` and `styleOrigin` (`call` or `global`)
 

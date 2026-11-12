@@ -29,7 +29,10 @@ import {
   styleParamDescription,
 } from "./styles.js";
 
-dotenv.config({ override: false });
+// CLI 与 MCP 服务是两条独立入口：MCP 客户端配置里的 env 只注入 MCP 子进程，
+// CLI 只读当前进程环境变量和**当前目录**的 .env。quiet 避免没有 .env 时也打印
+// "injected env (0) from .env"，那行容易让人误以为配置已加载。
+dotenv.config({ override: false, quiet: true });
 
 // ====== 配置 ======
 const TMP_DIR = path.join(os.tmpdir(), "banana-image-mcp");
@@ -39,7 +42,7 @@ if (!fs.existsSync(TMP_DIR)) {
 
 // 生图默认参数（可被环境变量或调用参数覆盖）
 const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
-const DEFAULT_VISION_MODEL = "gemini-2.5-flash";
+const DEFAULT_VISION_MODEL = "gemini-3.8-flash";
 const DEFAULT_ASPECT_RATIO = "16:9";
 const DEFAULT_IMAGE_SIZE = "1K";
 const MAX_STYLE_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -195,7 +198,12 @@ export async function loadStyleReference(source) {
 
 async function extractStylePrompt(source) {
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY is required to extract a style from an image.");
+    throw new Error(
+      "GEMINI_API_KEY is required to extract a style from an image. " +
+        "Export it in your shell, or run this command in a directory whose .env has GEMINI_API_KEY. " +
+        "The CLI does not read the env block of your MCP client config. " +
+        "(styles add --prompt does not need a key.)"
+    );
   }
   await ensureFetchProxy();
   const image = await loadStyleReference(source);

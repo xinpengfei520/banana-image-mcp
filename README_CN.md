@@ -275,6 +275,10 @@ claude mcp add banana-image -- npx -y banana-image-mcp
 | `banana-image-mcp --version` | 打印版本号 |
 | `banana-image-mcp` | 以 stdio 方式运行 MCP 服务（供 MCP 客户端调用） |
 
+> **CLI 从哪里读配置**：CLI 和 MCP 服务是两条独立入口。`setup` 写进客户端配置文件（`~/.claude.json`、`~/.codex/config.toml` 等）里的 `env`，只会注入 MCP 子进程；在终端里跑 `history` / `styles` 时，读的是**当前进程的环境变量**和**当前目录的 `.env`**。
+>
+> 因此 `styles add --image`（从参考图提取风格，会调用 Gemini 视觉模型）之前，请确保当前 shell 里能拿到 `GEMINI_API_KEY`：临时 `export GEMINI_API_KEY=...`，或者把 `.env` 放在你执行命令的那个目录。`styles add --prompt` 只写本地文件，不需要 key。
+
 ### `history` —— 生图历史日志
 
 每次 `generate_image` / `generate_blog_cover` / `upload_image` 调用都会记录到
@@ -311,7 +315,7 @@ npx -y banana-image-mcp history
 | `GEMINI_ASPECT_RATIO` | `16:9` | 生图比例，如 `16:9`、`1:1`、`9:16`、`4:3`、`3:2`、`21:9` |
 | `GEMINI_IMAGE_SIZE` | `1K` | 生图分辨率：`1K`、`2K` 或 `4K` |
 | `IMAGE_STYLE` | （无） | 全局风格 id，由 `banana-image-mcp setup` 写入。单次调用的 `style` 优先。该次传 `none` 则不套全局风格 |
-| `GEMINI_VISION_MODEL` | `gemini-2.5-flash` | 从参考图提取风格提示词时使用的模型。走和生图相同的代理或网关 |
+| `GEMINI_VISION_MODEL` | `gemini-3.8-flash` | 从参考图提取风格提示词时使用的模型。走和生图相同的代理或网关 |
 | `WEBP_QUALITY` | `80` | WebP 压缩质量（1–100） |
 
 > 以上为默认值；`generate_blog_cover` 与 `generate_image` 也支持在调用时传入
@@ -432,6 +436,8 @@ banana-image-mcp styles add --name "奶油笔记" --prompt "Soft cream paper, hu
 ```
 
 如果看到一张图的风格好看，但不想自己写提示词，可以把本地路径或 http(s) 链接交给它。视觉模型只描述画面体系（介质、配色、字体、版式），这段文字会存成风格提示词。图里的主体和标题文字不会写进去。
+
+用 `--image` 时命令行会调用 Gemini 视觉模型（`GEMINI_VISION_MODEL`），因此当前 shell 里必须能拿到 `GEMINI_API_KEY`——它不会从 MCP 客户端配置里继承，详见上文「CLI 从哪里读配置」。
 
 ```bash
 banana-image-mcp styles add --name "奶油笔记" --image ./ref.png

@@ -281,6 +281,10 @@ claude mcp add banana-image -- npx -y banana-image-mcp
 | `banana-image-mcp --version` | Print the version |
 | `banana-image-mcp` | Run the MCP server over stdio (used by MCP clients) |
 
+> **Where the CLI reads config**: the CLI and the MCP server are separate entry points. The `env` block `setup` writes into a client config (`~/.claude.json`, `~/.codex/config.toml`, …) only reaches the MCP child process. When you run `history` / `styles` in a terminal, the CLI reads the **current process environment** and the **`.env` in the current directory**.
+>
+> So before `styles add --image` (which calls a Gemini vision model), make sure `GEMINI_API_KEY` is available in that shell: `export GEMINI_API_KEY=...`, or put a `.env` in the directory you run the command from. `styles add --prompt` only writes a local file and needs no key.
+
 ### `history` — generation log
 
 Every `generate_image` / `generate_blog_cover` / `upload_image` call is logged to
@@ -318,7 +322,7 @@ interactive terminal use **↑/↓** (or `j`/`k`) to page through older entries 
 | `GEMINI_ASPECT_RATIO` | `16:9` | Aspect ratio, e.g. `16:9`, `1:1`, `9:16`, `4:3`, `3:2`, `21:9` |
 | `GEMINI_IMAGE_SIZE` | `1K` | Resolution: `1K`, `2K` or `4K` |
 | `IMAGE_STYLE` | (none) | Global style id, written by `banana-image-mcp setup`. A `style` on one call wins. Pass `none` on that call to skip it |
-| `GEMINI_VISION_MODEL` | `gemini-2.5-flash` | Model that extracts a style prompt from a reference image. Uses the same proxy or gateway as generation |
+| `GEMINI_VISION_MODEL` | `gemini-3.8-flash` | Model that extracts a style prompt from a reference image. Uses the same proxy or gateway as generation |
 | `WEBP_QUALITY` | `80` | WebP compression quality (1–100) |
 
 > These are defaults; `generate_blog_cover` and `generate_image` also accept per-call
@@ -442,6 +446,8 @@ banana-image-mcp styles add --name "cream-note" --prompt "Soft cream paper, huge
 ```
 
 If you have a picture whose look you want, and you do not want to write the prompt yourself, pass a local path or an http(s) URL. A vision model describes only the visual system (medium, palette, lettering, layout) and that text is saved as the style prompt. The subject and any title in the picture are left out.
+
+With `--image` the CLI calls a Gemini vision model (`GEMINI_VISION_MODEL`), so `GEMINI_API_KEY` must be available in the current shell. It is not inherited from your MCP client config — see "Where the CLI reads config" above.
 
 ```bash
 banana-image-mcp styles add --name "cream-note" --image ./ref.png
